@@ -6,6 +6,9 @@ x = Fiber!(Dense(Element(0.0)), rand(10000));
 y = Fiber!(Dense(Element(0.0)), zeros(10000));
 temp2 = Scalar(0.0)
 
+# y = Ax (A symmetric)
+# Optimization: 1x flops, 2x memory bandwidth
+# TIME: ~15ms
 eval(@finch_kernel function ssymv(y, A, x, temp2)
     for j = _
         temp1 = x[j]
