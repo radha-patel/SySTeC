@@ -6,7 +6,7 @@ B = Fiber!(Dense(Dense(Element(0.0))), rand(10000, 10000))
 C = Fiber!(Dense(Dense(Element(0.0))), zeros(10000, 10000))
 
 # C = AB (A symmetric)
-# TIME: 92.518 ms
+# TIME: ~90ms
 eval(@finch_kernel function elementwise_naive(C, A, B)
            for j=_, i=_
                C[i, j] = A[i, j] * B[i, j]

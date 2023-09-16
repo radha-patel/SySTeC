@@ -4,9 +4,9 @@ using BenchmarkTools
 A = Fiber!(Dense(SparseList(Element(0.0))), fsprand((10000, 10000), 0.1))
 C = Fiber!(Dense(Dense(Element(0.0))), zeros(10000, 10000))
 
-C = AA^T (A symmetric)
-Optimization: 1x flops, 2x memory bandwidth
-TIME: 88.357 s
+# C = AA^T (A symmetric)
+# Optimization: 1x flops, 2x memory bandwidth
+# TIME: ~90s
 eval(@finch_kernel function ssyrk(C, A) 
     for l = _, j = _
         temp = A[j, l]
@@ -18,7 +18,7 @@ end)
 
 # C = AA^T (A symmetric)
 # Optimization: 2x flops, 2x memory bandwidth
-# TIME: 102.253 s
+# TIME: ~100s
 # eval(@finch_kernel function ssyrk(C, A) 
 #     for l = _, j = _
 #         temp1 = A[j, l]
