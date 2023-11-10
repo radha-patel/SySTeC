@@ -67,7 +67,7 @@ _C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, 1, n)))
 # C[i, j, l] = A[i, k, l] * X[k, j]
 # C[l, j, i] = A[l, k, i] * X[k, j]
 # C[i, j, l] = C[l, j, i]
-temp4 = Scalar(0.0)
+temp4 = Fiber!(Dense(Element(0.0)), zeros(n))
 eval(@finch_kernel mode=fastfinch function n_mode_product3(C, A, X, temp2, temp4) 
     for j=_, i=_
         temp4 .= 0
@@ -89,10 +89,18 @@ eval(@finch_kernel mode=fastfinch function n_mode_product3(C, A, X, temp2, temp4
                 C[i, j, l] += temp2[]
             end
             if i < l
-                temp4[] += A[i, i, l] * X[l, j]
+                for k=_
+                    if k <= i
+                        temp4[k] += A[k, i, l] * X[l, j]
+                    end
+                end
             end
         end
-        C[i, j, i] += temp4[]
+        for k=_
+            if k <= i
+                C[k, j, i] += temp4[k]
+            end
+        end
     end
 end)
 
