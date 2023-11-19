@@ -16,12 +16,12 @@ j = n
     temp2 = Scalar(0)
     temp4 = Fiber!(Dense(Element(0)), rand(Int, n))
 
-    eval(@finch_kernel mode=fastfinch function mode2_product_ref(C, A, X)
-        C .= 0
-        for l=_, j=_, k=_, i=_ 
-            C[i, j, l] += A[i, k, l] * X[k, j] 
-        end
-    end)
+    # eval(@finch_kernel mode=fastfinch function mode2_product_ref(C, A, X)
+    #     C .= 0
+    #     for l=_, j=_, k=_, i=_ 
+    #         C[i, j, l] += A[i, k, l] * X[k, j] 
+    #     end
+    # end)
 
     eval(@finch_kernel mode=fastfinch function mode1_product_ref(C, A, X)
         C .= 0
@@ -49,6 +49,26 @@ j = n
     #                     end
     #                     if k < i
     #                         temp2[] += X[k, j] * temp3
+    #                     end
+    #                 end
+    #             end
+    #         end
+    #         C[i, j, l] += temp2[]
+    #     end
+    # end)
+
+    # eval(@finch_kernel mode=fastfinch function mode1_product_opt1(C, A, X, temp2) 
+    #     C .= 0
+    #     for l=_, j=_, i=_
+    #         temp2 .= 0
+    #         let temp1 = X[j, i]
+    #             for k=_ 
+    #                 let temp3 = A[k, j, l]
+    #                     if k <= j 
+    #                         C[i, k, l] += temp1 * temp3
+    #                     end
+    #                     if k < j
+    #                         temp2[] += X[k, i] * temp3
     #                     end
     #                 end
     #             end
@@ -162,29 +182,6 @@ j = n
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode3_product_opt4(C, A, X, temp2) 
-    #     C .= 0
-    #     for j=_, l=_, i=_
-    #         if i <= l
-    #             temp2 .= 0
-    #             for k=_ 
-    #                 let temp3 = A[k, i, l]
-    #                     if k <= i
-    #                         C[k, j, l] += X[i, j] * temp3
-    #                         if i < l
-    #                             C[k, j, i] += X[l, j] * temp3
-    #                         end
-    #                     end
-    #                     if k < i
-    #                         temp2[] += X[k, j] * temp3
-    #                     end
-    #                 end
-    #             end
-    #             C[i, j, l] += temp2[]
-    #         end
-    #     end
-    # end)
-
     # will need to do a permute afterwards to switch i and j in C[j, i, l]
     # eval(@finch_kernel mode=fastfinch function mode2_product_opt5(C, _C, A, X, X_T, temp2) 
     #     C .= 0
@@ -211,6 +208,33 @@ j = n
     #         end
     #     end
     # end)
+
+
+    eval(@finch_kernel mode=fastfinch function mode1_product_opt5(C, _C, A, X, X_T, temp2) 
+        C .= 0
+        _C .= 0
+        for l=_, i=_
+            if i <= l
+                for j=_
+                    temp2 .= 0
+                    for k=_ 
+                        let temp3 = A[k, i, l]
+                            if k <= i
+                                C[j, k, l] += X_T[j, i] * temp3
+                                if i < l
+                                    C[j, k, i] += X_T[j, l] * temp3
+                                end
+                            end
+                            if k < i
+                                temp2[] += X[k, j] * temp3
+                            end
+                        end
+                    end
+                    _C[i, j, l] += temp2[]
+                end
+            end
+        end
+    end)
 
 function main()
     # MODE 2
@@ -268,6 +292,16 @@ function main()
     @btime mode1_product_opt1($C, $A, $X, $temp2)
 
     @info "check" C == ref
+
+    @btime mode1_product_opt5($C, $_C, $A, $X, $X_T, $temp2)
+
+    check = Scalar(true)
+    @finch for l=_, j=_, i=_
+        if i <= l
+            check[] &= (C[i, j, l] + _C[j, i, l]) == ref[i, j, l]
+        end
+    end
+    @info "check" check[]
 end
 
 main()
