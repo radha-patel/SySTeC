@@ -114,6 +114,43 @@ j = n
     #     end
     # end)
 
+    # eval(@finch_kernel mode=fastfinch function mode1_product_opt2(C, A, X, temp2, temp4) 
+    #     C .= 0
+    #     for i=_, j=_
+    #         temp4 .= 0
+    #         for l=_
+    #             if i <= l
+    #                 temp2 .= 0
+    #                 let temp1 = X[i, j]
+    #                     for k=_ 
+    #                         let temp3 = A[k, i, l]
+    #                             if k <= i
+    #                                 C[j, k, l] += temp1 * temp3
+    #                             end
+    #                             if k < i
+    #                                 temp2[] += X[k, j] * temp3
+    #                             end
+    #                         end
+    #                     end
+    #                 end
+    #                 C[j, i, l] += temp2[]
+    #             end
+    #             if i < l
+    #                 for k=_
+    #                     if k <= i
+    #                         temp4[k] += A[k, i, l] * X[l, j]
+    #                     end
+    #                 end
+    #             end
+    #         end
+    #         for k=_
+    #             if k <= i
+    #                 C[j, k, i] += temp4[k]
+    #             end
+    #         end
+    #     end
+    # end)
+
     # eval(@finch_kernel mode=fastfinch function mode2_product_opt3(C, A, X, temp2) 
     #     C .= 0
     #     for l=_, j=_, i=_
@@ -133,6 +170,28 @@ j = n
     #             end
     #         end
     #         C[i, j, l] += temp2[]
+    #     end
+    # end)
+
+    # eval(@finch_kernel mode=fastfinch function mode1_product_opt3(C, A, X, temp2) 
+    #     C .= 0
+    #     for l=_, j=_, i=_
+    #         temp2 .= 0
+    #         let temp1 = X[i, j]
+    #             for k=_ 
+    #                 if k <= l
+    #                     let temp3 = A[k, i, l]
+    #                         if k <= i 
+    #                             C[j, k, l] += temp1 * temp3
+    #                         end
+    #                         if k < i
+    #                             temp2[] += X[k, j] * temp3
+    #                         end
+    #                     end
+    #                 end
+    #             end
+    #         end
+    #         C[j, i, l] += temp2[]
     #     end
     # end)
 
@@ -215,23 +274,27 @@ j = n
         _C .= 0
         for l=_, i=_
             if i <= l
-                for j=_
-                    temp2 .= 0
+                # for j=_
+                    # temp2 .= 0
                     for k=_ 
                         let temp3 = A[k, i, l]
                             if k <= i
-                                C[j, k, l] += X_T[j, i] * temp3
-                                if i < l
-                                    C[j, k, i] += X_T[j, l] * temp3
+                                for j=_
+                                    C[j, k, l] += X_T[j, i] * temp3
+                                    if i < l
+                                        C[j, k, i] += X_T[j, l] * temp3
+                                    end
                                 end
                             end
                             if k < i
-                                temp2[] += X[k, j] * temp3
+                                for j=_
+                                    C[j, i, l] += X[k, j] * temp3
+                                end
                             end
                         end
                     end
-                    _C[i, j, l] += temp2[]
-                end
+                    # C[j, i, l] += temp2[]
+                # end
             end
         end
     end)
@@ -289,15 +352,35 @@ function main()
     ref = Fiber!(Dense(Dense(Dense(Element(0), n), n), n))
     @btime mode1_product_ref($ref, $A, $X)
 
-    @btime mode1_product_opt1($C, $A, $X, $temp2)
+    # @btime mode1_product_opt1($C, $A, $X, $temp2)
 
-    @info "check" C == ref
+    # @info "check" C == ref
+
+    # @btime mode1_product_opt2($C, $A, $X, $temp2, $temp4)
+
+    # check = Scalar(true)
+    # @finch for l=_, j=_, i=_
+    #     if i <= l
+    #         check[] &= C[i, j, l] == ref[i, j, l]
+    #     end
+    # end
+    # @info "check" check[]
+
+    # @btime mode1_product_opt3($C, $A, $X, $temp2)
+
+    # check = Scalar(true)
+    # @finch for l=_, j=_, i=_
+    #     if j <= l
+    #         check[] &= C[i, j, l] == ref[i, j, l]
+    #     end
+    # end
+    # @info "check" check[]
 
     @btime mode1_product_opt5($C, $_C, $A, $X, $X_T, $temp2)
 
     check = Scalar(true)
     @finch for l=_, j=_, i=_
-        if i <= l
+        if j <= l
             check[] &= (C[i, j, l] + _C[j, i, l]) == ref[i, j, l]
         end
     end
