@@ -1,18 +1,22 @@
 using Finch
 using BenchmarkTools
+using SparseArrays
 
-n = 100
-j = n
+n = 10
 
     triA = rand(Int, n, n, n)
     symA = [triA[sort([i, j, k])...] for i = 1:n, j = 1:n, k = 1:n]
-    x = rand(Int, n, j)
+    x = rand(Int, n, n)
 
-    A = Fiber!(Dense(SparseList(SparseList(Element(0)))), symA)
+    # To test with A actually being sparse 
+    # A = Fiber!(Dense(Dense(SparseList(Element(0)))), fsprand((n, n, n), 0.1))
+    # TODO: finish this
+
+    A = Fiber!(Dense(SparseList(SparseList(Element(0)))), symA)    
     X = Fiber!(Dense(Dense(Element(0))), x)
     X_T = Fiber!(Dense(Dense(Element(0))), transpose(x))
-    C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(n, j, n))
-    _C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(j, n, n))
+    C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
+    _C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
     temp2 = Scalar(0)
     temp4 = Fiber!(Dense(Element(0)), rand(Int, n))
 
@@ -38,23 +42,23 @@ j = n
     # end)
 
     # eval(@finch_kernel mode=fastfinch function mode2_product_opt1(C, A, X, temp2) 
-    #     C .= 0
-    #     for l=_, j=_, i=_
-    #         temp2 .= 0
-    #         let temp1 = X[i, j]
-    #             for k=_ 
-    #                 let temp3 = A[k, i, l]
-    #                     if k <= i 
-    #                         C[k, j, l] += temp1 * temp3
-    #                     end
-    #                     if k < i
-    #                         temp2[] += X[k, j] * temp3
-    #                     end
-    #                 end
-    #             end
-    #         end
-    #         C[i, j, l] += temp2[]
-    #     end
+        # C .= 0
+        # for l=_, j=_, i=_
+        #     temp2 .= 0
+        #     let temp1 = X[i, j]
+        #         for k=_ 
+        #             let temp3 = A[k, i, l]
+        #                 if k <= i 
+        #                     C[k, j, l] += temp1 * temp3
+        #                 end
+        #                 if k < i
+        #                     temp2[] += X[k, j] * temp3
+        #                 end
+        #             end
+        #         end
+        #     end
+        #     C[i, j, l] += temp2[]
+        # end
     # end)
 
     # eval(@finch_kernel mode=fastfinch function mode1_product_opt1(C, A, X, temp2) 
@@ -245,56 +249,51 @@ j = n
     # eval(@finch_kernel mode=fastfinch function mode2_product_opt5(C, _C, A, X, X_T, temp2) 
     #     C .= 0
     #     _C .= 0
-    #     for l=_, i=_
-    #         if i <= l
-    #             for j=_
-    #                 temp2 .= 0
-    #                 for k=_ 
-    #                     let temp3 = A[k, i, l]
-    #                         if k <= i
-    #                             C[k, j, l] += X_T[j, i] * temp3
-    #                             if i < l
-    #                                 C[k, j, i] += X_T[j, l] * temp3
-    #                             end
-    #                         end
-    #                         if k < i
-    #                             temp2[] += X[k, j] * temp3
-    #                         end
-    #                     end
-    #                 end
-    #                 _C[j, i, l] += temp2[]
-    #             end
-    #         end
-    #     end
+        # for l=_, i=_
+        #     if i <= l
+        #         for j=_
+        #             temp2 .= 0
+        #             for k=_ 
+        #                 let temp3 = A[k, i, l]
+        #                     if k <= i
+        #                         C[k, j, l] += X_T[j, i] * temp3
+        #                         if i < l
+        #                             C[k, j, i] += X_T[j, l] * temp3
+        #                         end
+        #                     end
+        #                     if k < i
+        #                         temp2[] += X[k, j] * temp3
+        #                     end
+        #                 end
+        #             end
+        #             _C[j, i, l] += temp2[]
+        #         end
+        #     end
+        # end
     # end)
 
 
-    eval(@finch_kernel mode=fastfinch function mode1_product_opt5(C, _C, A, X, X_T, temp2) 
+    eval(@finch_kernel mode=fastfinch function mode1_product_opt5(C, A, X, X_T) 
         C .= 0
-        _C .= 0
         for l=_, i=_
             if i <= l
-                # for j=_
-                    # temp2 .= 0
-                    for k=_ 
-                        let temp3 = A[k, i, l]
-                            if k <= i
-                                for j=_
-                                    C[j, k, l] += X_T[j, i] * temp3
-                                    if i < l
-                                        C[j, k, i] += X_T[j, l] * temp3
-                                    end
-                                end
-                            end
-                            if k < i
-                                for j=_
-                                    C[j, i, l] += X[k, j] * temp3
+                for k=_ 
+                    let temp3 = A[k, i, l]
+                        if k <= i
+                            for j=_
+                                C[j, k, l] += X_T[j, i] * temp3
+                                if i < l
+                                    C[j, k, i] += X_T[j, l] * temp3
                                 end
                             end
                         end
+                        if k < i
+                            for j=_
+                                C[j, i, l] += X_T[j, k] * temp3
+                            end
+                        end
                     end
-                    # C[j, i, l] += temp2[]
-                # end
+                end
             end
         end
     end)
@@ -376,12 +375,12 @@ function main()
     # end
     # @info "check" check[]
 
-    @btime mode1_product_opt5($C, $_C, $A, $X, $X_T, $temp2)
+    @btime mode1_product_opt5($C, $A, $X, $X_T)
 
     check = Scalar(true)
     @finch for l=_, j=_, i=_
         if j <= l
-            check[] &= (C[i, j, l] + _C[j, i, l]) == ref[i, j, l]
+            check[] &= C[i, j, l] == ref[i, j, l]
         end
     end
     @info "check" check[]
