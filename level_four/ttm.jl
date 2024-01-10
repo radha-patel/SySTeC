@@ -2,7 +2,7 @@ using Finch
 using BenchmarkTools
 using SparseArrays
 
-n = 10
+n = 3
 
     triA = rand(Int, n, n, n)
     symA = [triA[sort([i, j, k])...] for i = 1:n, j = 1:n, k = 1:n]
@@ -15,6 +15,8 @@ n = 10
     A = Fiber!(Dense(SparseList(SparseList(Element(0)))), symA)    
     X = Fiber!(Dense(Dense(Element(0))), x)
     X_T = Fiber!(Dense(Dense(Element(0))), transpose(x))
+    # C = Fiber!(Dense(Dense(Dense(Dense(Element(0))))), zeros(n, n, n, n))
+    # _C = Fiber!(Dense(Dense(Dense(Dense(Element(0))))), zeros(n, n, n, n))
     C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
     _C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
     temp2 = Scalar(0)
@@ -30,6 +32,7 @@ n = 10
     eval(@finch_kernel mode=fastfinch function mode1_product_ref(C, A, X)
         C .= 0
         for l=_, j=_, k=_, i=_ 
+            # C[i, j, k, l] += A[k, j, l] * X[k, i] 
             C[i, j, l] += A[k, j, l] * X[k, i] 
         end
     end)
@@ -281,14 +284,17 @@ n = 10
                     let temp3 = A[k, i, l]
                         if k <= i
                             for j=_
+                                # C[i, j, k, l] += X_T[j, i] * temp3
                                 C[j, k, l] += X_T[j, i] * temp3
                                 if i < l
+                                    # C[l, j, k, i] += X_T[j, l] * temp3
                                     C[j, k, i] += X_T[j, l] * temp3
                                 end
                             end
                         end
                         if k < i
                             for j=_
+                                # C[k, j, i, l] += X_T[j, k] * temp3
                                 C[j, i, l] += X_T[j, k] * temp3
                             end
                         end
@@ -348,6 +354,7 @@ function main()
     # @info "check" check[]
 
     # MODE 1
+    # ref = Fiber!(Dense(Dense(Dense(Dense(Element(0), n), n), n), n))
     ref = Fiber!(Dense(Dense(Dense(Element(0), n), n), n))
     @btime mode1_product_ref($ref, $A, $X)
 
@@ -378,8 +385,11 @@ function main()
     @btime mode1_product_opt5($C, $A, $X, $X_T)
 
     check = Scalar(true)
+    # @finch for l=_, k=_, j=_, i=_
     @finch for l=_, j=_, i=_
+        # if l <= j
         if j <= l
+            # check[] &= C[k, i, l, j] == ref[i, j, k, l]
             check[] &= C[i, j, l] == ref[i, j, l]
         end
     end
