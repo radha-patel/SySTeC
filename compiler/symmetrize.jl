@@ -57,7 +57,7 @@ function transform(ex)
         _transform = Rewrite(Postwalk(Chain([
             # Group equivalent assignments
             (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
-                block(~s1..., assign(~lhs, +, call(*, 2, ~rhs)), ~s2..., ~s3...)),
+                block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...)),
             # Consolidate identical reads
             (@rule block(~s1...) => begin
                 counts = Dict()
@@ -83,6 +83,62 @@ function transform(ex)
     ex
 end
 
+function get_intermediate_output(tn, count)
+    ctx = JuliaContext()
+    var_name = Symbol("_", tn.val, count)
+    var = freshen(ctx, var_name)
+end
+
+function find_swaps(_A, B)
+    A = copy(_A)
+    swaps = []
+    for i in 1:length(A)
+        if A[i] != B[i]
+            match_idx = findfirst(x -> x == B[i], A)
+            push!(swaps, (i, match_idx))
+            A[i], A[match_idx] = A[match_idx], A[i]
+        end
+    end
+    return swaps
+end
+
+function get_indices_to_replicate(lhs1, lhs2)
+    @capture lhs1 access(~tn1, updater, ~idxs1...)
+    @capture lhs2 access(~tn2, updater, ~idxs2...)
+    find_swaps(idxs1, idxs2)
+end
+
+
+function transform_with_post_processing(ex)
+    replicate = Dict()
+    count = 1
+    transformed = false
+    prev = ex 
+    while prev != ex || !transformed 
+        _transform = Rewrite(Postwalk(Chain([
+            # Group equivalent assignments
+            (@rule block(~s1..., assign(~lhs1, +, ~rhs), ~s2..., assign(~lhs2, +, ~rhs), ~s3...) => begin
+                @capture lhs1 access(~tn1, updater, ~idxs1...)
+                @capture lhs2 access(~tn2, updater, ~idxs2...)
+                swaps = find_swaps(idxs1, idxs2)
+                if haskey(replicate, swaps)
+                    _tn = replicate[swaps]
+                else
+                    _tn = get_intermediate_output(tn1, count)
+                    replicate[swaps] = _tn
+                    count += 1
+                end
+                _lhs = access(_tn, updater, idxs1...)
+                block(s1..., assign(_lhs, +, rhs), s2..., s3...)
+            end)
+        ])))
+        transformed = true
+        prev = ex
+        ex = _transform(ex)
+    end
+    ex, replicate
+end
+
 # TODO: account for partial symmetry
 function find_symmetry(ex, symmetric_tns)
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
@@ -95,5 +151,7 @@ function find_symmetry(ex, symmetric_tns)
     permuted = permute_symmetries(ex, permutable_idxs[1])
     normalized = normalize(permuted, issymmetric)
     transformed = transform(normalized)
-    display(transformed)
+    ex, replicate = transform_with_post_processing(transformed)
+    display(ex)
+    print(replicate)
 end
