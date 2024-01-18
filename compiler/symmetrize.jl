@@ -1,15 +1,17 @@
 using Finch
+using Finch: freshen, JuliaContext
 using Finch.FinchNotation
 using RewriteTools
 using RewriteTools.Rewriters
 using Combinatorics
+using AbstractTrees
 
 import Finch.FinchNotation: and, or
 
 isindex(ex::FinchNode) = ex.kind === index
 order_canonically(idxs) = sort(idxs, by = i->i.val)
-
 iscommutative(op) = typeof(op.val) == typeof(*) ? true : false
+get_var_name(tn, idxs) = Symbol(tn.val, "_", join([idx.val for idx in idxs]))
 
 function triangularize(idxs)
     idxs = order_canonically(idxs)
@@ -55,7 +57,24 @@ function transform(ex)
         _transform = Rewrite(Postwalk(Chain([
             # Group equivalent assignments
             (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
-                block(~s1..., assign(~lhs, +, call(*, 2, ~rhs)), ~s2..., ~s3...))
+                block(~s1..., assign(~lhs, +, call(*, 2, ~rhs)), ~s2..., ~s3...)),
+            # Consolidate identical reads
+            (@rule block(~s1...) => begin
+                counts = Dict()
+                ex = block(~s1...)
+                for node in PostOrderDFS(block(~s1...)) 
+                    counts[node] = get(counts, node, 0) + 1
+                end
+                for (node, count) in counts
+                    if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
+                        ctx = JuliaContext()
+                        var = freshen(ctx, get_var_name(tn, idxs))
+                        ex = Postwalk(@rule node => var)(ex)
+                        ex = define(var, access(tn, reader, idxs...), ex)
+                    end
+                end
+                ex
+            end)
         ])))
         transformed = true
         prev = ex
