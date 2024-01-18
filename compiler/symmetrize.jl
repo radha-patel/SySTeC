@@ -9,15 +9,7 @@ import Finch.FinchNotation: and, or
 isindex(ex::FinchNode) = ex.kind === index
 order_canonically(idxs) = sort(idxs, by = i->i.val)
 
-iscommutative(::typeof(or)) = true
-iscommutative(::typeof(and)) = true
-iscommutative(::typeof(|)) = true
-iscommutative(::typeof(&)) = true
-iscommutative(::typeof(+)) = true
-iscommutative(::typeof(*)) = true
-iscommutative(::typeof(min)) = true
-iscommutative(::typeof(max)) = true
-iscommutative(alg) = false
+iscommutative(op) = typeof(op.val) == typeof(*) ? true : false
 
 function triangularize(idxs)
     idxs = order_canonically(idxs)
@@ -51,7 +43,7 @@ function normalize(ex, issymmetric)
         # Sort indices of symmetric matrices in canonical order (alphabetical)
         (@rule access(~tn::issymmetric, ~mode, ~idxs...) => access(tn, mode, order_canonically(idxs)...)),
         # Sort operands in canonical order
-        (@rule call(~op, ~tns...) => call(op, sort(tns, by = tn->hash(tn))...))
+        (@rule call(~op::iscommutative, ~tns...) => call(op, sort(tns, by = tn->hash(tn))...))
     ])))
     _normalize(ex)
 end
