@@ -48,6 +48,22 @@ function normalize(ex, issymmetric)
     _normalize(ex)
 end
 
+function transform(ex)
+    transformed = false
+    prev = ex 
+    while prev != ex || !transformed 
+        _transform = Rewrite(Postwalk(Chain([
+            # Group equivalent assignments
+            (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
+                block(~s1..., assign(~lhs, +, call(*, 2, ~rhs)), ~s2..., ~s3...))
+        ])))
+        transformed = true
+        prev = ex
+        ex = _transform(ex)
+    end
+    ex
+end
+
 # TODO: account for partial symmetry
 function find_symmetry(ex, symmetric_tns)
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
@@ -59,47 +75,6 @@ function find_symmetry(ex, symmetric_tns)
     # TODO: assumption that there is one symmetric matrix
     permuted = permute_symmetries(ex, permutable_idxs[1])
     normalized = normalize(permuted, issymmetric)
-    display(normalized)
-
-    permuted_exs = []
-    map = Dict{Vector{FinchNode}, Set{FinchNode}}([])
-    for idxs in permutable_idxs
-        for permutation in permutations(idxs)
-            new_ex = deepcopy(ex)
-            operands = []
-            Postwalk((x) -> if ((@capture x access(~tn, reader, ~original_idxs...)) || (@capture x access(~tn, updater, ~original_idxs...)))
-                _original_idxs = deepcopy(original_idxs)
-                if !(tn.val in symmetric_tns)
-                    for i in 1:length(idxs)
-                        idxs_to_replace = findall(y -> y == idxs[i], _original_idxs)
-                        for j in idxs_to_replace
-                            original_idxs[j] = permutation[i]
-                        end
-                    end
-                end
-                if @capture x access(~tn, reader, ~original_idxs...)
-                    push!(operands, x)
-                end
-            end)(new_ex)
-            display(new_ex)
-            push!(permuted_exs, new_ex)
-            # Sort operands in canonical order (ensure that operator is commutative before doing this)
-            sort!(operands, by = operands -> hash(operands))
-        
-            if @capture new_ex assign(~lhs, ~op, ~rhs)
-                lhs_set = get(map, operands, Set([]))
-                push!(lhs_set, lhs)
-                map[operands] = lhs_set
-            end
-        end
-    end
-
-    for update in keys(map)
-        if length(map[update]) > 1 
-            println("The following positions are the same (output symmetry):")
-            for lhs in map[update]
-                println(lhs)
-            end
-        end
-    end
+    transformed = transform(normalized)
+    display(transformed)
 end
