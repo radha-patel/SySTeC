@@ -22,8 +22,19 @@ function triangularize(idxs)
     return length(conditions) > 1 ? call(and, conditions...) : conditions[1]
 end
 
+
+function triangularize(idxs, strict)
+    idxs = order_canonically(idxs)
+    conditions = []
+    for i in 1:length(idxs)-1
+        op = strict[i] == 1 ? (<) : (<=)
+        push!(conditions, call(op, idxs[i], idxs[i+1]))
+    end
+    return length(conditions) > 1 ? call(and, conditions...) : conditions[1]
+end
+
 # TODO: add condition
-function permute_symmetries(ex, idxs)
+function permute_symmetries(ex, idxs, diagonals)
     permuted_exs = []
     for perm in permutations(idxs)
         ex_2 = Rewrite(Postwalk(@rule ~idx::isindex => begin
@@ -31,13 +42,16 @@ function permute_symmetries(ex, idxs)
         end))(ex)
         push!(permuted_exs, ex_2)
     end
-    return sieve(triangularize(idxs), block(permuted_exs...))
+    return diagonals ? block(permuted_exs...) : sieve(triangularize(idxs), block(permuted_exs...))
 end
 
 function get_permutable_idxs(rhs, issymmetric)
-    permutable = []
-    Postwalk(@rule access(~tn::issymmetric, ~mode, ~idxs...) => push!(permutable, idxs))(rhs)
-    return permutable
+    permutable = Dict()
+    Postwalk(@rule access(~tn::issymmetric, ~mode, ~idxs...) => begin 
+        permutable_idxs = get(permutable, tn.val, Set())
+        permutable[tn.val] = union(permutable_idxs, Set(idxs))
+    end)(rhs)
+    return [collect(idxs) for idxs in values(permutable)]
 end
 
 function normalize(ex, issymmetric)
@@ -58,23 +72,24 @@ function transform(ex)
             # Group equivalent assignments
             (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
                 block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...)),
+            # TODO: move this to separate step
             # Consolidate identical reads
-            (@rule block(~s1...) => begin
-                counts = Dict()
-                ex = block(~s1...)
-                for node in PostOrderDFS(block(~s1...)) 
-                    counts[node] = get(counts, node, 0) + 1
-                end
-                for (node, count) in counts
-                    if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
-                        ctx = JuliaContext()
-                        var = freshen(ctx, get_var_name(tn, idxs))
-                        ex = Postwalk(@rule node => var)(ex)
-                        ex = define(var, access(tn, reader, idxs...), ex)
-                    end
-                end
-                ex
-            end)
+            # (@rule block(~s1...) => begin
+            #     counts = Dict()
+            #     ex = block(~s1...)
+            #     for node in PostOrderDFS(block(~s1...)) 
+            #         counts[node] = get(counts, node, 0) + 1
+            #     end
+            #     for (node, count) in counts
+            #         if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
+            #             ctx = JuliaContext()
+            #             var = freshen(ctx, get_var_name(tn, idxs))
+            #             ex = Postwalk(@rule node => var)(ex)
+            #             ex = define(var, access(tn, reader, idxs...), ex)
+            #         end
+            #     end
+            #     ex
+            # end)
         ])))
         transformed = true
         prev = ex
@@ -139,8 +154,29 @@ function transform_with_post_processing(ex)
     ex, replicate
 end
 
+function add_conditions(ex, idxs)
+    @capture ex block(~s...)
+    sieves = []
+
+    @assert length(s) % length(idxs) == 0
+    n = Int(length(s) / length(idxs))
+    clause = sieve(triangularize(idxs), block(s[1:n]...))
+    push!(sieves, clause)
+
+    range = length(idxs) - 1
+    for i in 1:range
+        strict = zeros(range)
+        strict[i] = 1
+        println(strict)
+        clause = sieve(triangularize(idxs, strict), block(s[n*i + 1 : n*i + n]...)) 
+        push!(sieves, clause)
+    end
+
+    return block(sieves...)
+end
+
 # TODO: account for partial symmetry
-function find_symmetry(ex, symmetric_tns)
+function symmetrize(ex, symmetric_tns, include_diagonals)
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
 
     # Helper methods
@@ -148,10 +184,12 @@ function find_symmetry(ex, symmetric_tns)
 
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
     # TODO: assumption that there is one symmetric matrix
-    permuted = permute_symmetries(ex, permutable_idxs[1])
+    permuted = permute_symmetries(ex, permutable_idxs[1], include_diagonals)
     normalized = normalize(permuted, issymmetric)
     transformed = transform(normalized)
     ex, replicate = transform_with_post_processing(transformed)
-    display(ex)
-    print(replicate)
+    if include_diagonals
+        ex = add_conditions(ex, permutable_idxs[1])
+    end
+    ex
 end
