@@ -33,6 +33,12 @@ function triangularize(idxs, strict)
     return length(conditions) > 1 ? call(and, conditions...) : conditions[1]
 end
 
+function make_strict(cond)
+    Rewrite(Postwalk(Chain([
+        (@rule call(<=, ~a, ~b) => call(<, a, b))
+    ])))(cond)
+end
+
 # TODO: add condition
 function permute_symmetries(ex, idxs, diagonals)
     permuted_exs = []
@@ -64,7 +70,7 @@ function normalize(ex, issymmetric)
     _normalize(ex)
 end
 
-function transform(ex)
+function transform(ex, diagonals)
     transformed = false
     prev = ex 
     while prev != ex || !transformed 
@@ -158,18 +164,31 @@ function add_conditions(ex, idxs)
     @capture ex block(~s...)
     sieves = []
 
-    @assert length(s) % length(idxs) == 0
-    n = Int(length(s) / length(idxs))
-    clause = sieve(triangularize(idxs), block(s[1:n]...))
-    push!(sieves, clause)
-
-    range = length(idxs) - 1
-    for i in 1:range
-        strict = zeros(range)
-        strict[i] = 1
-        println(strict)
-        clause = sieve(triangularize(idxs, strict), block(s[n*i + 1 : n*i + n]...)) 
+    @assert length(s) % length(idxs) == 0 || length(s) == 1
+    if length(s) == 1
+        clause = sieve(triangularize(idxs), block(s[1]))
         push!(sieves, clause)
+    else
+        n = Int(length(s) / length(idxs))
+        clause = sieve(triangularize(idxs), block(s[1:n]...))
+        push!(sieves, clause)
+
+        range = length(idxs) - 1
+        for i in 1:range
+            strict = zeros(range)
+            strict[i] = 1
+            clause = sieve(triangularize(idxs, strict), block(s[n*i + 1 : n*i + n]...)) 
+            push!(sieves, clause)
+        end
+    end
+
+    # Account for invisible output symmetry
+    for i in 1:length(sieves)
+        # TODO: generalize for multiple updates in sieve
+        if @capture sieves[i] sieve(~cond, block(assign(~lhs, +, call(*, 2, ~tn))))
+            s = assign(lhs, +, tn)
+            sieves[i] = sieve(cond, block(s, sieve(make_strict(cond), s)))
+        end
     end
 
     return block(sieves...)
@@ -186,10 +205,13 @@ function symmetrize(ex, symmetric_tns, include_diagonals)
     # TODO: assumption that there is one symmetric matrix
     permuted = permute_symmetries(ex, permutable_idxs[1], include_diagonals)
     normalized = normalize(permuted, issymmetric)
-    transformed = transform(normalized)
+    transformed = transform(normalized, include_diagonals)
     ex, replicate = transform_with_post_processing(transformed)
+    println("Before adding diagonals:")
+    display(ex)
     if include_diagonals
         ex = add_conditions(ex, permutable_idxs[1])
     end
-    ex
+    println("After adding diagonals:")
+    display(ex)
 end
