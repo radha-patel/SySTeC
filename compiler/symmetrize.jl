@@ -77,22 +77,22 @@ function transform(ex, diagonals)
             block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...)),
         # TODO: move this to separate step
         # Consolidate identical reads
-        # (@rule block(~s1...) => begin
-        #     counts = Dict()
-        #     ex = block(~s1...)
-        #     for node in PostOrderDFS(block(~s1...)) 
-        #         counts[node] = get(counts, node, 0) + 1
-        #     end
-        #     for (node, count) in counts
-        #         if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
-        #             ctx = JuliaContext()
-        #             var = freshen(ctx, get_var_name(tn, idxs))
-        #             ex = Postwalk(@rule node => var)(ex)
-        #             ex = define(var, access(tn, reader, idxs...), ex)
-        #         end
-        #     end
-        #     ex
-        # end)
+        (@rule block(~s1...) => begin
+            counts = Dict()
+            ex = block(~s1...)
+            for node in PostOrderDFS(block(~s1...)) 
+                counts[node] = get(counts, node, 0) + 1
+            end
+            for (node, count) in counts
+                if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
+                    ctx = JuliaContext()
+                    var = freshen(ctx, get_var_name(tn, idxs))
+                    ex = Postwalk(@rule node => var)(ex)
+                    ex = define(var, access(tn, reader, idxs...), ex)
+                end
+            end
+            ex
+        end)
     ])))
     Fixpoint(_transform)(ex)
 end
@@ -126,8 +126,6 @@ end
 function transform_with_post_processing(ex)
     replicate = Dict()
     count = 1
-    transformed = false
-    prev = ex 
     _transform = Rewrite(Postwalk(Chain([
         # Group equivalent assignments
         (@rule block(~s1..., assign(~lhs1, +, ~rhs), ~s2..., assign(~lhs2, +, ~rhs), ~s3...) => begin
@@ -149,37 +147,37 @@ function transform_with_post_processing(ex)
 end
 
 function add_conditions(ex, idxs)
-    @capture ex block(~s...)
-    sieves = []
-
-    @assert length(s) % length(idxs) == 0 || length(s) == 1
-    if length(s) == 1
-        clause = sieve(triangularize(idxs), block(s[1]))
-        push!(sieves, clause)
-    else
-        n = Int(length(s) / length(idxs))
-        clause = sieve(triangularize(idxs), block(s[1:n]...))
-        push!(sieves, clause)
-
-        range = length(idxs) - 1
-        for i in 1:range
-            strict = zeros(range)
-            strict[i] = 1
-            clause = sieve(triangularize(idxs, strict), block(s[n*i + 1 : n*i + n]...)) 
+    Rewrite(Postwalk(@rule block(~s...) => begin
+        sieves = []
+        @assert length(s) % length(idxs) == 0 || length(s) == 1
+        if length(s) == 1
+            clause = sieve(triangularize(idxs), block(s[1]))
             push!(sieves, clause)
-        end
-    end
+        else
+            n = Int(length(s) / length(idxs))
+            clause = sieve(triangularize(idxs), block(s[1:n]...))
+            push!(sieves, clause)
 
-    # Account for invisible output symmetry
-    for i in 1:length(sieves)
-        # TODO: generalize for multiple updates in sieve
-        if @capture sieves[i] sieve(~cond, block(assign(~lhs, +, call(*, 2, ~tn))))
-            s = assign(lhs, +, tn)
-            sieves[i] = sieve(cond, block(s, sieve(make_strict(cond), s)))
+            range = length(idxs) - 1
+            for i in 1:range
+                strict = zeros(range)
+                strict[i] = 1
+                clause = sieve(triangularize(idxs, strict), block(s[n*i + 1 : n*i + n]...)) 
+                push!(sieves, clause)
+            end
         end
-    end
 
-    return block(sieves...)
+        # Account for invisible output symmetry
+        for i in 1:length(sieves)
+            # TODO: generalize for multiple updates in sieve
+            if @capture sieves[i] sieve(~cond, block(assign(~lhs, +, call(*, 2, ~tn))))
+                s = assign(lhs, +, tn)
+                sieves[i] = sieve(cond, block(s, sieve(make_strict(cond), s)))
+            end
+        end
+
+        block(sieves...)
+    end))(ex)
 end
 
 # TODO: account for partial symmetry
