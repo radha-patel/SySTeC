@@ -168,15 +168,19 @@ function add_conditions(ex, idxs)
         end
 
         # Account for invisible output symmetry
+        sieves_2 = []
         for i in 1:length(sieves)
             # TODO: generalize for multiple updates in sieve
             if @capture sieves[i] sieve(~cond, block(assign(~lhs, +, call(*, 2, ~tn))))
                 s = assign(lhs, +, tn)
-                sieves[i] = sieve(cond, block(s, sieve(make_strict(cond), s)))
+                push!(sieves_2, sieve(cond, s))
+                push!(sieves_2, sieve(make_strict(cond), s))
+            else
+                push!(sieves_2, sieves[i])
             end
         end
 
-        block(sieves...)
+        block(sieves_2...)
     end))(ex)
 end
 
