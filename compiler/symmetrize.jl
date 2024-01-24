@@ -71,37 +71,30 @@ function normalize(ex, issymmetric)
 end
 
 function transform(ex, diagonals)
-    transformed = false
-    prev = ex 
-    while prev != ex || !transformed 
-        _transform = Rewrite(Postwalk(Chain([
-            # Group equivalent assignments
-            (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
-                block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...)),
-            # TODO: move this to separate step
-            # Consolidate identical reads
-            # (@rule block(~s1...) => begin
-            #     counts = Dict()
-            #     ex = block(~s1...)
-            #     for node in PostOrderDFS(block(~s1...)) 
-            #         counts[node] = get(counts, node, 0) + 1
-            #     end
-            #     for (node, count) in counts
-            #         if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
-            #             ctx = JuliaContext()
-            #             var = freshen(ctx, get_var_name(tn, idxs))
-            #             ex = Postwalk(@rule node => var)(ex)
-            #             ex = define(var, access(tn, reader, idxs...), ex)
-            #         end
-            #     end
-            #     ex
-            # end)
-        ])))
-        transformed = true
-        prev = ex
-        ex = _transform(ex)
-    end
-    ex
+    _transform = Rewrite(Postwalk(Chain([
+        # Group equivalent assignments
+        (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
+            block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...)),
+        # TODO: move this to separate step
+        # Consolidate identical reads
+        # (@rule block(~s1...) => begin
+        #     counts = Dict()
+        #     ex = block(~s1...)
+        #     for node in PostOrderDFS(block(~s1...)) 
+        #         counts[node] = get(counts, node, 0) + 1
+        #     end
+        #     for (node, count) in counts
+        #         if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
+        #             ctx = JuliaContext()
+        #             var = freshen(ctx, get_var_name(tn, idxs))
+        #             ex = Postwalk(@rule node => var)(ex)
+        #             ex = define(var, access(tn, reader, idxs...), ex)
+        #         end
+        #     end
+        #     ex
+        # end)
+    ])))
+    Fixpoint(_transform)(ex)
 end
 
 function get_intermediate_output(tn, count)
@@ -135,29 +128,24 @@ function transform_with_post_processing(ex)
     count = 1
     transformed = false
     prev = ex 
-    while prev != ex || !transformed 
-        _transform = Rewrite(Postwalk(Chain([
-            # Group equivalent assignments
-            (@rule block(~s1..., assign(~lhs1, +, ~rhs), ~s2..., assign(~lhs2, +, ~rhs), ~s3...) => begin
-                @capture lhs1 access(~tn1, updater, ~idxs1...)
-                @capture lhs2 access(~tn2, updater, ~idxs2...)
-                swaps = find_swaps(idxs1, idxs2)
-                if haskey(replicate, swaps)
-                    _tn = replicate[swaps]
-                else
-                    _tn = get_intermediate_output(tn1, count)
-                    replicate[swaps] = _tn
-                    count += 1
-                end
-                _lhs = access(_tn, updater, idxs1...)
-                block(s1..., assign(_lhs, +, rhs), s2..., s3...)
-            end)
-        ])))
-        transformed = true
-        prev = ex
-        ex = _transform(ex)
-    end
-    ex, replicate
+    _transform = Rewrite(Postwalk(Chain([
+        # Group equivalent assignments
+        (@rule block(~s1..., assign(~lhs1, +, ~rhs), ~s2..., assign(~lhs2, +, ~rhs), ~s3...) => begin
+            @capture lhs1 access(~tn1, updater, ~idxs1...)
+            @capture lhs2 access(~tn2, updater, ~idxs2...)
+            swaps = find_swaps(idxs1, idxs2)
+            if haskey(replicate, swaps)
+                _tn = replicate[swaps]
+            else
+                _tn = get_intermediate_output(tn1, count)
+                replicate[swaps] = _tn
+                count += 1
+            end
+            _lhs = access(_tn, updater, idxs1...)
+            block(s1..., assign(_lhs, +, rhs), s2..., s3...)
+        end)
+    ])))
+    Fixpoint(_transform)(ex), replicate
 end
 
 function add_conditions(ex, idxs)
@@ -207,11 +195,8 @@ function symmetrize(ex, symmetric_tns, include_diagonals)
     normalized = normalize(permuted, issymmetric)
     transformed = transform(normalized, include_diagonals)
     ex, replicate = transform_with_post_processing(transformed)
-    println("Before adding diagonals:")
-    display(ex)
     if include_diagonals
         ex = add_conditions(ex, permutable_idxs[1])
     end
-    println("After adding diagonals:")
     display(ex)
 end
