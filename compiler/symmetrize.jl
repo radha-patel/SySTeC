@@ -57,7 +57,7 @@ function get_permutable_idxs(rhs, issymmetric)
         permutable_idxs = get(permutable, tn.val, Set())
         permutable[tn.val] = union(permutable_idxs, Set(idxs))
     end)(rhs)
-    return [collect(idxs) for idxs in values(permutable)]
+    return order_canonically([collect(idxs) for idxs in values(permutable)])
 end
 
 function normalize(ex, issymmetric)
@@ -184,6 +184,61 @@ function add_conditions(ex, idxs)
     end))(ex)
 end
 
+function recursively_generate_conditions(pairs)
+    idx_1, idx_2 = pairs[1][1], pairs[1][2]
+    if length(pairs) == 1
+        return [call(!=, idx_1, idx_2), call(==, idx_1, idx_2)]
+    elseif length(pairs) == 2
+        all_conds = []
+        for partial_cond in recursively_generate_conditions(pairs[2:end])
+            push!(all_conds, call(and, call(!=, idx_1, idx_2), partial_cond))
+            push!(all_conds, call(and, call(==, idx_1, idx_2), partial_cond))
+        end
+        return all_conds
+    else
+        all_conds = []
+        for partial_cond in recursively_generate_conditions(pairs[2:end])
+            @capture partial_cond call(and, ~partial_conds...)
+            push!(all_conds, call(and, call(!=, idx_1, idx_2), partial_conds...))
+            push!(all_conds, call(and, call(==, idx_1, idx_2), partial_conds...))
+        end
+        return all_conds
+    end
+end
+
+function get_conditions(idxs)
+    pairs = [[idxs[i], idxs[i+1]] for i in 1:length(idxs)-1]
+    recursively_generate_conditions(pairs)
+end
+
+# function consolidate(ex)
+#     _consolidate = Rewrite(Postwalk(Chain([
+#         (@rule block(~s1..., sieve(~cond1, ~body), ~s2..., sieve(~cond2, ~body), ~s3...) => begin
+#             if @capture cond1 call(and, ~c1...) && @capture cond2 call(and, ~c2...)
+#                 replicated_conds = []
+#                 single_conds = []
+#                 for (_c1, _c2) in zip(c1, c2)
+#                     @capture _c1 call(~op1, ~i1...)
+#                     @capture _c2 call(~op2, ~i2...)
+#                     if op1 == literal(<=) || op2 == literal(<=)
+#                         push!(single_conds, call(==, i1...))
+#                     else
+#                         push!(single_conds, call(!=, i1...))
+#                     end
+#                     push!(replicated_conds, call(<, i1...))
+#                 end
+#             end
+
+#             @capture body assign(~lhs, +, ~rhs)
+#             clause_1 = sieve(call(and, replicated_conds...), assign(lhs, +, call(*, 2, rhs)))
+#             clause_2 = sieve(call(and, single_conds...), body)
+#             block(clause_1, clause_2, s1..., s2..., s3...)
+#         end)
+#     ])))
+#     Fixpoint(_consolidate)(ex)
+#     # _consolidate(ex)
+# end
+
 # TODO: account for partial symmetry
 function symmetrize(ex, symmetric_tns, include_diagonals)
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
@@ -200,5 +255,8 @@ function symmetrize(ex, symmetric_tns, include_diagonals)
     if include_diagonals
         ex = add_conditions(ex, permutable_idxs[1])
     end
+    display(get_conditions(permutable_idxs[1]))
+    # ex = consolidate(ex)
+    println("REPLICATE: ", replicate)
     display(ex)
 end
