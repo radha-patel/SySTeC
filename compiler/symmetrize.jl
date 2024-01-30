@@ -57,7 +57,7 @@ function get_permutable_idxs(rhs, issymmetric)
         permutable_idxs = get(permutable, tn.val, Set())
         permutable[tn.val] = union(permutable_idxs, Set(idxs))
     end)(rhs)
-    return order_canonically([collect(idxs) for idxs in values(permutable)])
+    return [order_canonically(collect(idxs)) for idxs in values(permutable)]
 end
 
 function normalize(ex, issymmetric)
@@ -211,6 +211,28 @@ function get_conditions(idxs)
     recursively_generate_conditions(pairs)
 end
 
+function get_subsymmetry(cond)
+    subsymmetry = []
+    @capture cond call(and, ~conds...)
+    for cond in conds
+        if @capture cond call(==, ~idx_1, ~idx_2)
+            if length(subsymmetry) > 0 && idx_1 in subsymmetry[1]
+                push!(subsymmetry[1], idx_2)
+            else
+                push!(subsymmetry, [idx_1, idx_2])
+            end
+        end
+    end
+    subsymmetry
+end
+
+function add_updates(conds)
+    for cond in conds
+        display(cond)
+        display(get_subsymmetry(cond))
+    end
+end
+
 # function consolidate(ex)
 #     _consolidate = Rewrite(Postwalk(Chain([
 #         (@rule block(~s1..., sieve(~cond1, ~body), ~s2..., sieve(~cond2, ~body), ~s3...) => begin
@@ -255,7 +277,9 @@ function symmetrize(ex, symmetric_tns, include_diagonals)
     if include_diagonals
         ex = add_conditions(ex, permutable_idxs[1])
     end
-    display(get_conditions(permutable_idxs[1]))
+    conds = get_conditions(permutable_idxs[1])
+    display(conds)
+    add_updates(conds)
     # ex = consolidate(ex)
     println("REPLICATE: ", replicate)
     display(ex)
