@@ -51,13 +51,24 @@ function permute_symmetries(ex, idxs, diagonals)
     return diagonals ? block(permuted_exs...) : sieve(triangularize(idxs), block(permuted_exs...))
 end
 
+function permute_indices(ex, idxs, permutations)
+    permuted_exs = []
+    for perm in permutations
+        ex_2 = Rewrite(Postwalk(@rule ~idx::isindex => begin
+            idx in idxs ? perm[findfirst(i -> i == idx, idxs)] : idx
+        end))(ex)
+        push!(permuted_exs, ex_2)
+    end
+    return block(permuted_exs...)
+end
+
 function get_permutable_idxs(rhs, issymmetric)
     permutable = Dict()
     Postwalk(@rule access(~tn::issymmetric, ~mode, ~idxs...) => begin 
         permutable_idxs = get(permutable, tn.val, Set())
         permutable[tn.val] = union(permutable_idxs, Set(idxs))
     end)(rhs)
-    return [order_canonically(collect(idxs)) for idxs in values(permutable)]
+    return [collect(idxs) for idxs in values(permutable)]
 end
 
 function normalize(ex, issymmetric)
@@ -207,6 +218,7 @@ function recursively_generate_conditions(pairs)
 end
 
 function get_conditions(idxs)
+    idxs = order_canonically(idxs)
     pairs = [[idxs[i], idxs[i+1]] for i in 1:length(idxs)-1]
     recursively_generate_conditions(pairs)
 end
@@ -226,10 +238,29 @@ function get_subsymmetry(cond)
     subsymmetry
 end
 
-function add_updates(conds)
+sort_permutations = perms -> sort(collect(perms), by=idxs -> [i.val for i in idxs])
+function get_permutations(idxs, subsymmetry)
+    perms = Dict()
+    for perm in permutations(idxs)
+        translated_perm = deepcopy(perm)
+        for group in subsymmetry
+            for idx in group[2:end]
+                translated_perm[findfirst(i -> i == idx, translated_perm)] = group[1]
+            end
+        end
+        perms_2 = get(perms, translated_perm, Set())
+        perms[translated_perm] = union(perms_2, Set([perm]))
+    end
+    return [sort_permutations(perms_2)[1] for perms_2 in values(perms)]
+end
+
+function add_updates(ex, conds, permutable_idxs)
     for cond in conds
+        subsymmetry = get_subsymmetry(cond)
+        perms = get_permutations(permutable_idxs, subsymmetry)
+        updates = permute_indices(ex, permutable_idxs, perms)
         display(cond)
-        display(get_subsymmetry(cond))
+        display(updates)
     end
 end
 
@@ -270,6 +301,7 @@ function symmetrize(ex, symmetric_tns, include_diagonals)
 
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
     # TODO: assumption that there is one symmetric matrix
+    original_ex = ex
     permuted = permute_symmetries(ex, permutable_idxs[1], include_diagonals)
     normalized = normalize(permuted, issymmetric)
     transformed = transform(normalized, include_diagonals)
@@ -278,8 +310,7 @@ function symmetrize(ex, symmetric_tns, include_diagonals)
         ex = add_conditions(ex, permutable_idxs[1])
     end
     conds = get_conditions(permutable_idxs[1])
-    display(conds)
-    add_updates(conds)
+    add_updates(original_ex, conds, [k, j, l])
     # ex = consolidate(ex)
     println("REPLICATE: ", replicate)
     display(ex)
