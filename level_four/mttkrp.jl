@@ -1,7 +1,7 @@
 using Finch
 using BenchmarkTools
 
-n = 10
+n = 100
 
     triA = rand(Int, n, n, n)
     # triA = fill(1, (n, n, n))
@@ -92,23 +92,25 @@ n = 10
     println("evaluating opt3")
     eval(@finch_kernel mode=fastfinch function mttkrp_opt3(C, A, B)
         C .= 0
-        for j=_, l=_, k=_, i=_
-            let A_ikl = A[i, k, l], B_kj = B[k, j], B_lj = B[l, j], B_ij = B[i, j]
-                let ik_equal = (i == k), kl_equal = (k == l), il_equal = (i == l)
-                let any_equal = ik_equal || kl_equal || il_equal, all_equal = ik_equal && kl_equal
+        for l=_, k=_, i=_, j=_
+            let A_ikl = A[i, k, l], B_kj = B[j, k], B_lj = B[j, l], B_ij = B[j, i]
+                let ik_equal = (i == k), kl_equal = (k == l)
+                let any_equal = ik_equal || kl_equal, all_equal = ik_equal && kl_equal
                     if i <= k && k <= l
-                        if !any_equal
-                            C[i, j] += 2 * B_kj * A_ikl * B_lj
-                            C[k, j] += 2 * B_ij * A_ikl * B_lj
-                            C[l, j] += 2 * B_kj * B_ij * A_ikl
-                        end
-                        if any_equal && !all_equal
-                            C[i, j] += B_kj * A_ikl * B_lj
-                            C[k, j] += B_ij * A_ikl * B_lj
-                            C[l, j] += B_kj * B_ij * A_ikl
-                        end
-                        if all_equal
-                            C[i, j] += B_kj * A_ikl * B_lj
+                        let C_ij = B_kj * A_ikl * B_lj, C_kj = B_ij * A_ikl * B_lj, C_lj = B_kj * B_ij * A_ikl
+                            if !any_equal
+                                C[j, i] += 2 * C_ij
+                                C[j, k] += 2 * C_kj
+                                C[j, l] += 2 * C_lj
+                            end
+                            if any_equal && !all_equal
+                                C[j, i] += C_ij
+                                C[j, k] += C_kj
+                                C[j, l] += C_lj
+                            end
+                            if all_equal
+                                C[j, i] += C_ij
+                            end
                         end
                     end
                 end
@@ -193,10 +195,14 @@ n = 10
     # end
     # @info "check" check[]
 
-    @btime mttkrp_opt3($C, $A, $B)
+    B_T = Tensor(Dense(Dense(Element(0))), zeros(Int, n, n))
+    @finch for j=_, i=_
+        B_T[i, j] = B[j, i]
+    end
+    @btime mttkrp_opt3($C, $A, $B_T)
     check = Scalar(true)
     @finch for j=_, i=_
-        check[] &= C[i, j] == ref[i, j]
+        check[] &= C[j, i] == ref[i, j]
     end
     @info "check" check[]
 
