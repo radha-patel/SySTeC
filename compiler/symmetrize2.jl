@@ -243,6 +243,202 @@ function group_assignments(ex)
                         block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...))))(ex)
 end
 
+
+"""
+    find_swaps(_A, B)
+
+Return list of lists of length two consisting of pair of indices that need
+to be swapped in `_A` to make `_A` equivalent to `B`.
+"""
+function find_swaps(_A, B)
+    A = copy(_A)
+    swaps = []
+    for i in 1:length(A)
+        if A[i] != B[i]
+            match_idx = findfirst(x -> x == B[i], A)
+            push!(swaps, (i, match_idx))
+            A[i], A[match_idx] = A[match_idx], A[i]
+        end
+    end
+    return swaps
+end
+
+
+"""
+    get_intermediate_output(tn, count)
+
+Return new symbol with name of form "tn_count".
+"""
+function get_intermediate_output(tn, count)
+    ctx = JuliaContext()
+    var_name = Symbol("_", tn.val, count)
+    var = freshen(ctx, var_name)
+end
+
+
+# TODO: what if multiple indices need to be swapped in intermediate output? what is a kernel in which this would be the case?
+"""
+    exploit_output_replication_base(ex)
+
+Given block `ex` consisting of updates that need to be performed for all nondiagonal 
+coordinates, determine where output symmetry exists and introduce an intermediate 
+output tensor that includes only canonical coordinates of otuput and can be replicated 
+in post-processing.
+
+Returns new expression, dictionary mapping lists of indices that need to be swapped
+to the intermediate tensor in which they should be swapped, and a boolean representing
+whether or not the output is fully symmetry across an axis. 
+"""
+function exploit_output_replication_base(ex)
+    @capture ex block(~s...)
+    update_count = length(s)
+
+    replicate = Dict()
+    count = 1
+    ex = Fixpoint(Rewrite(Postwalk(@rule block(~s1..., assign(~lhs1, +, ~rhs), ~s2..., assign(~lhs2, +, ~rhs), ~s3...) => begin
+            @capture lhs1 access(~tn1, updater, ~idxs1...)
+            @capture lhs2 access(~tn2, updater, ~idxs2...)
+            swaps = find_swaps(idxs1, idxs2)
+            if haskey(replicate, swaps)
+                _tn = replicate[swaps]
+            else
+                _tn = get_intermediate_output(tn1, count)
+                replicate[swaps] = _tn
+                count += 1
+            end
+            _lhs = access(_tn, updater, idxs1...)
+            block(s1..., assign(_lhs, +, rhs), s2..., s3...)
+        end)
+    ))(ex)
+
+    fully_replicable = false
+    @capture ex block(~s...)
+    if length(s) == update_count / 2 
+        fully_replicable = true
+    end
+
+    ex, replicate, fully_replicable
+end
+
+
+"""
+    exploit_output_replication_edge(ex, fully_replicable, replicate)
+
+Given block `ex` consisting of updates that need to be performed to handle a set
+of diagonal coordinates, boolean `fully_replicable` representing whether the output
+is fully symmetric across an axis in the output, and `replicate` mapping lists of indices
+that need to be swapped to intermediate output tensors, return new expression with 
+intermediate outputs used wherever possible.
+"""
+function exploit_output_replication_edge(ex, fully_replicable, replicate)
+    @capture ex block(~s...)
+    update_count = length(s)
+
+    count = 1
+    # TODO: standardize variable names
+    ex = Fixpoint(Rewrite(Postwalk(@rule block(~s1..., assign(~lhs1, +, ~rhs), ~s2..., assign(~lhs2, +, ~rhs), ~s3...) => begin
+            @capture lhs1 access(~tn1, updater, ~idxs1...)
+            @capture lhs2 access(~tn2, updater, ~idxs2...)
+            swaps = find_swaps(idxs1, idxs2)
+            if haskey(replicate, swaps)
+                _tn = replicate[swaps]
+            else
+                _tn = get_intermediate_output(tn1, count)
+                replicate[swaps] = _tn
+                count += 1
+            end
+            _lhs = access(_tn, updater, idxs1...)
+            block(s1..., assign(_lhs, +, rhs), s2..., s3...)
+        end)
+    ))(ex)
+
+    # if fully replicable replace all instances of original output tensor
+    # with tensor that will later be replicated 
+    if fully_replicable
+        #TODO: should confirm that replicate dict only has one value if fully_replicable
+        tn_2 = first(values(replicate))
+        ex = Fixpoint(Rewrite(Postwalk(@rule assign(~lhs, +, ~rhs) => begin
+                if @capture lhs access(~tn, updater, ~idxs...)
+                    if tn != tn_2
+                        lhs = access(tn_2, updater, idxs...)
+                    end
+                end
+                assign(lhs, +, rhs)
+            end)
+        ))(ex)
+    end
+    ex, replicate
+end
+
+
+"""
+    is_base(cond)
+
+Returns boolean representing whether `cond` is an expression with only != relations.
+"""
+function is_base(cond)
+    if !(@capture cond call(and, ~conds...))
+        conds = [cond]
+    end
+    for cond in conds
+        if @capture cond call(==, ~a, ~b)
+            return false
+        end
+    end
+    return true
+end
+
+
+# TODO: how to handle/mark fully_replicable case if there are multiple axes of output symmetry 
+# TODO: does being fully_replicable mean that there is only one entry in replicate dict
+"""
+    exploit_output_replication(ex) 
+
+Return an expression that exploits output symmetry and dictionary that maps lists of indices
+across which values need to be replicated to the intermediate output in which these values need
+to be replicated.
+"""
+function exploit_output_replication(ex) 
+    replicate = Dict()
+    fully_replicable = false
+
+    ex = Rewrite(Postwalk(@rule ex sieve(~cond::is_base, ~body) => begin
+        body, replicate, fully_replicable = exploit_output_replication_base(body)
+        return sieve(cond, body)
+    end))(ex)
+
+    Rewrite(Postwalk(@rule ex sieve(~cond::((c) -> !is_base(c)), ~body) => begin
+        body, replicate = exploit_output_replication_edge(body, fully_replicable, replicate)
+        return sieve(cond, body)
+    end))(ex)
+end
+
+
+"""
+    consolidate_reads(ex)
+
+Replace multiple access to a tensor with a let statement outside block.
+"""
+function consolidate_reads(ex)
+    Rewrite(Postwalk(@rule block(~s1...) => begin
+        counts = Dict()
+        ex = block(~s1...)
+        for node in PostOrderDFS(block(~s1...)) 
+            counts[node] = get(counts, node, 0) + 1
+        end
+        for (node, count) in counts
+            if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
+                ctx = JuliaContext()
+                var = freshen(ctx, get_var_name(tn, idxs))
+                ex = Postwalk(@rule node => var)(ex)
+                ex = define(var, access(tn, reader, idxs...), ex)
+            end
+        end
+        ex
+    end))(ex)
+end
+
+
 """
     symmetrize2(ex, symmetric_tns)
 
@@ -259,4 +455,6 @@ function symmetrize2(ex, symmetric_tns)
     ex = add_updates(ex, conditions, permutable_idxs[1], issymmetric)
     # group_sieves(ex) # TODO: fix group_sieves
     ex = group_assignments(ex)
+    ex = exploit_output_replication(ex) # TODO: fix
+    ex = consolidate_reads(ex)
 end
