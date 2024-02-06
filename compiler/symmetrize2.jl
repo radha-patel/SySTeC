@@ -110,7 +110,7 @@ sort_permutations = perms -> sort(collect(perms), by=idxs -> [i.val for i in idx
 """
     get_permutations(idxs, subsymmetry)
 
-    Returns list of the caconical (i.e. alphabetical) form of all unique permutations 
+    Returns list of the canonical (i.e. alphabetical) form of all unique permutations 
     of `idxs` based on `subsymmetry` grouping (groups of equivalent indices)
 """
 function get_permutations(idxs, subsymmetry)
@@ -184,6 +184,55 @@ function add_updates(ex, conds, permutable_idxs, issymmetric)
 end
 
 
+#TODO: this step can probably be combined/happen within add_updates 
+#TODO: enumerate all permutations of b1_s and b2_s and check if pairs can be made the same
+function group_sieves(ex)
+    Rewrite(Postwalk(@rule block(~s1..., sieve(~c1, ~b1), ~s2..., sieve(~c2, ~b2), ~s3...) => begin
+        @capture b1 block(~b1_s...)
+        @capture b2 block(~b2_s...)
+
+        if length(b1_s) != length(b2_s)
+            return nothing
+        end
+
+        # rewrite b1 and b2 using only canonical index of equivalent indices
+        b1_subsymmetry = get_subsymmetry(c1)
+        b2_subsymmetry = get_subsymmetry(c2)
+
+        b1_2 = b1
+        for group in b1_subsymmetry
+            for idx in group[2:end]
+                b1_2 = Rewrite(Postwalk(@rule ~idx_2::isindex => idx_2 == idx ? group[1] : idx_2))(b1_2)
+            end
+        end
+
+        b2_2 = b2
+        for group in b2_subsymmetry
+            for idx in group[2:end]
+                b2_2 = Rewrite(Postwalk(@rule ~idx_2::isindex => idx_2 == idx ? group[1] : idx_2))(b2_2)
+            end
+        end
+        
+        # iterate through equivalent indices in b1 and rewrite b1 to include only one of index
+        # from each set of equivalent indices
+        for group in b1_subsymmetry
+            for idx in group[2:end]
+                b1_3 = Rewrite(Postwalk(@rule ~idx_2::isindex => idx_2 == group[1] ? idx : idx_2))(b1_2)
+                display(b1_3)
+                display(b2_2)
+                if b1_3 == b2_2 
+                    println("EQUIVALENT SIEVES FOUND")
+                end
+            end
+        end
+
+        #TODO: fix
+
+    end))(ex)
+    return nothing
+end
+
+
 """
     symmetrize2(ex, symmetric_tns)
 
@@ -197,5 +246,6 @@ function symmetrize2(ex, symmetric_tns)
 
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
     conditions = get_conditions(permutable_idxs[1])
-    add_updates(ex, conditions, permutable_idxs[1], issymmetric)
+    ex = add_updates(ex, conditions, permutable_idxs[1], issymmetric)
+    # group_sieves(ex) # TODO: fix group_sieves
 end
