@@ -40,23 +40,27 @@ order_canonically(idxs) = sort(idxs, by = i->i.val)
 Given list of lists of pairs of indices, return list of all combinations of == and !=
 relationships between indices in each pair.
 """
-function recursively_generate_conditions(pairs)
+function recursively_generate_conditions(pairs, diagonals=true)
     idx_1, idx_2 = pairs[1][1], pairs[1][2]
     if length(pairs) == 1
-        return [call(!=, idx_1, idx_2), call(==, idx_1, idx_2)]
+        return diagonals ? [call(!=, idx_1, idx_2), call(==, idx_1, idx_2)] : [call(!=, idx_1, idx_2)]
     elseif length(pairs) == 2
         all_conds = []
-        for partial_cond in recursively_generate_conditions(pairs[2:end])
+        for partial_cond in recursively_generate_conditions(pairs[2:end], diagonals)
             push!(all_conds, call(and, call(!=, idx_1, idx_2), partial_cond))
-            push!(all_conds, call(and, call(==, idx_1, idx_2), partial_cond))
+            if diagonals
+                push!(all_conds, call(and, call(==, idx_1, idx_2), partial_cond))
+            end
         end
         return all_conds
     else
         all_conds = []
-        for partial_cond in recursively_generate_conditions(pairs[2:end])
+        for partial_cond in recursively_generate_conditions(pairs[2:end], diagonals)
             @capture partial_cond call(and, ~partial_conds...)
             push!(all_conds, call(and, call(!=, idx_1, idx_2), partial_conds...))
-            push!(all_conds, call(and, call(==, idx_1, idx_2), partial_conds...))
+            if diagonals
+                push!(all_conds, call(and, call(==, idx_1, idx_2), partial_conds...))
+            end
         end
         return all_conds
     end
@@ -68,10 +72,10 @@ end
 
 Return list of all possible combinations of matching/non-matching indices.   
 """
-function get_conditions(idxs)
+function get_conditions(idxs, diagonals=true)
     idxs = order_canonically(idxs)
     pairs = [[idxs[i], idxs[i+1]] for i in 1:length(idxs)-1]
-    recursively_generate_conditions(pairs)
+    recursively_generate_conditions(pairs, diagonals)
 end
 
 
@@ -440,21 +444,44 @@ end
 
 
 """
+    triangularize(ex, permutable_idxs)
+
+Wrap `ex` in clause that restricts accesses to canonical triangle of `permutable_idxs`.
+"""
+function triangularize(ex, permutable_idxs, diagonals=true)
+    # Should only have one sieve in ex if no diagonals
+    if !diagonals && @capture ex block(sieve(~cond, ~body))
+        ex = body
+    end
+
+    idxs = order_canonically(permutable_idxs)
+    conditions = []
+    for i in 1:length(idxs)-1
+        push!(conditions, diagonals ? call(<=, idxs[i], idxs[i+1]) : call(<, idxs[i], idxs[i+1]))
+    end
+    condition = length(conditions) > 1 ? call(and, conditions...) : conditions[1]
+    return sieve(condition, ex)
+end
+
+
+"""
     symmetrize2(ex, symmetric_tns)
 
     Rewrite ex to exploit symmetry in the tensors marked as symmetric in symmetric_tns
 """
-function symmetrize2(ex, symmetric_tns)
+function symmetrize3(ex, symmetric_tns, diagonals=true)
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
 
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
 
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
-    conditions = get_conditions(permutable_idxs[1])
+    conditions = get_conditions(permutable_idxs[1], diagonals)
     ex = add_updates(ex, conditions, permutable_idxs[1], issymmetric)
     # group_sieves(ex) # TODO: fix group_sieves
     ex = group_assignments(ex)
-    ex = exploit_output_replication(ex) # TODO: fix
+    ex = exploit_output_replication(ex)
     ex = consolidate_reads(ex)
+    ex = triangularize(ex, permutable_idxs[1], diagonals)
+    display(ex)
 end
