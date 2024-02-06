@@ -110,8 +110,8 @@ sort_permutations = perms -> sort(collect(perms), by=idxs -> [i.val for i in idx
 """
     get_permutations(idxs, subsymmetry)
 
-    Returns list of the canonical (i.e. alphabetical) form of all unique permutations 
-    of `idxs` based on `subsymmetry` grouping (groups of equivalent indices)
+Returns list of the canonical (i.e. alphabetical) form of all unique permutations 
+of `idxs` based on `subsymmetry` grouping (groups of equivalent indices)
 """
 function get_permutations(idxs, subsymmetry)
     perms = Dict()
@@ -132,9 +132,9 @@ end
 """
     permute_indices(ex, idxs, permutations)
 
-    Returns a block with length(permutations) expressions where expression i has its
-    indices permutated such that each index idxs[j] is replaced with index 
-    permutations[i][j]
+Returns a block with length(permutations) expressions where expression i has its
+indices permutated such that each index idxs[j] is replaced with index 
+permutations[i][j]
 """
 function permute_indices(ex, idxs, permutations)
     permuted_exs = []
@@ -151,7 +151,7 @@ end
 """
     normalize(ex, issymmetric)
 
-    Returns normalized form of `ex` 
+Returns normalized form of `ex` 
 """
 function normalize(ex, issymmetric)
     _normalize = Rewrite(Postwalk(Chain([
@@ -167,9 +167,9 @@ end
 """
     add_updates(ex, conds, permutable_idxs, issymmetric)
 
-    Returns a block containing sieves with each possible combination of equivalent
-    and non-equivalent indices as the condition and all the updates that need to be 
-    applied to the output given that combination of indices.   
+Returns a block containing sieves with each possible combination of equivalent
+and non-equivalent indices as the condition and all the updates that need to be 
+applied to the output given that combination of indices.   
 """
 function add_updates(ex, conds, permutable_idxs, issymmetric)
     sieves = []
@@ -234,9 +234,19 @@ end
 
 
 """
+    group_assignments(ex)
+    
+Return rewritten ex with equivalent assignments in a block grouped together.
+"""
+function group_assignments(ex)
+    Fixpoint(Rewrite(Postwalk(@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
+                        block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...))))(ex)
+end
+
+"""
     symmetrize2(ex, symmetric_tns)
 
-Rewrite ex to exploit symmetry in the tensors marked as symmetric in symmetric_tns
+    Rewrite ex to exploit symmetry in the tensors marked as symmetric in symmetric_tns
 """
 function symmetrize2(ex, symmetric_tns)
     # helper methods
@@ -248,4 +258,5 @@ function symmetrize2(ex, symmetric_tns)
     conditions = get_conditions(permutable_idxs[1])
     ex = add_updates(ex, conditions, permutable_idxs[1], issymmetric)
     # group_sieves(ex) # TODO: fix group_sieves
+    ex = group_assignments(ex)
 end
