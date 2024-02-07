@@ -393,6 +393,7 @@ function is_base(cond)
 end
 
 
+# TODO: make sure that we keep canonical coordinates of output (replicate for non-canonical)
 # TODO: how to handle/mark fully_replicable case if there are multiple axes of output symmetry 
 # TODO: does being fully_replicable mean that there is only one entry in replicate dict
 """
@@ -449,7 +450,7 @@ end
 Wrap `ex` in clause that restricts accesses to canonical triangle of `permutable_idxs`.
 """
 function triangularize(ex, permutable_idxs, diagonals=true)
-    # Should only have one sieve in ex if no diagonals
+    # should only have one sieve in ex if no diagonals
     if !diagonals && @capture ex block(sieve(~cond, ~body))
         ex = body
     end
@@ -461,6 +462,82 @@ function triangularize(ex, permutable_idxs, diagonals=true)
     end
     condition = length(conditions) > 1 ? call(and, conditions...) : conditions[1]
     return sieve(condition, ex)
+end
+
+# TODO: there should be a better/safer way to do this (e.g. somehow indicate nesting of ops) - something for future
+function consolidate_operators(ops)
+    if all(op -> in(op, ops), [literal(<=), literal(!=)]) && length(ops) == 2
+        return literal(<)
+    elseif all(op -> in(op, ops), [literal(<=), literal(==)]) && length(ops) == 2
+        return literal(==)
+    elseif all(op -> in(op, ops), [literal(<=), literal(==), literal(!=)]) && length(ops) == 3
+        return literal(<=)
+    else
+        throw(ArgumentError("Unexpected combination of operators"))
+    end
+end
+
+function consolidate_comparisons(conditions)
+    idx_comparisons = Dict()
+
+    for condition in conditions
+        if !(@capture condition call(and, ~pairwise_conditions...))
+            pairwise_conditions = [condition]
+        end
+        for pair in pairwise_conditions
+            @capture pair call(~op, ~idxs...)
+            ops = get(idx_comparisons, idxs, Set())
+            push!(ops, op)
+            idx_comparisons[idxs] = ops 
+        end
+    end
+
+    conditions_2 = []
+    for (idx, comparisons) in pairs(idx_comparisons)
+        op = consolidate_operators(comparisons)
+        push!(conditions_2, call(op, idx[1], idx[2]))
+    end
+
+    return length(conditions_2) == 1 ? conditions_2[1] : call(and, conditions_2...)
+end
+
+# TODO: still need to determine/evaluate when this is necessary/not necessary to do
+# TODO: docstrings for this & helpers
+function consolidate_conditions(ex)
+    conditions_map = Dict()
+    @capture ex sieve(~base_condition, ~body)
+
+    Postwalk(@rule sieve(~body_condition, ~body_2) => begin
+        @capture body_2 block(~updates...)
+        for update in updates
+            update_conditions = get(conditions_map, update, Set())
+            push!(update_conditions, body_condition)
+            push!(update_conditions, base_condition)
+            conditions_map[update] = update_conditions 
+        end
+    end)(body)
+    
+    updates_map = Dict()
+    for (update, conditions) in pairs(conditions_map)
+        consolidated_condition = consolidate_comparisons(conditions)
+        updates = get(updates_map, consolidated_condition, [])
+        push!(updates, update)
+        updates_map[consolidated_condition] = updates
+    end
+
+    sieves = []
+    for (condition, updates) in pairs(updates_map)
+        push!(sieves, sieve(condition, block(updates...)))
+    end
+
+    return block(sieves...)
+end
+
+
+# TODO: implement
+function nest_conditions(ex)
+    # determine which conditions are nestable
+    # nest accordingly 
 end
 
 
@@ -481,7 +558,12 @@ function symmetrize3(ex, symmetric_tns, diagonals=true)
     # group_sieves(ex) # TODO: fix group_sieves
     ex = group_assignments(ex)
     ex = exploit_output_replication(ex)
-    ex = consolidate_reads(ex)
     ex = triangularize(ex, permutable_idxs[1], diagonals)
+    @info "before consolidating conditions"
+    display(ex)
+    ex = consolidate_conditions(ex)
+    ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
+    # TODO: compare # of conditions from before/after consolidate_conditions and keep version with less
+    @info "after consolidating conditions"
     display(ex)
 end
