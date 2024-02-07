@@ -310,7 +310,8 @@ function exploit_output_replication_base(ex)
                 replicate[swaps] = _tn
                 count += 1
             end
-            _lhs = access(_tn, updater, idxs1...)
+            idxs_3 = sort_permutations([idxs1, idxs2])[1]
+            _lhs = access(_tn, updater, idxs_3...)
             block(s1..., assign(_lhs, +, rhs), s2..., s3...)
         end)
     ))(ex)
@@ -351,7 +352,8 @@ function exploit_output_replication_edge(ex, fully_replicable, replicate)
                 replicate[swaps] = _tn
                 count += 1
             end
-            _lhs = access(_tn, updater, idxs1...)
+            idxs_3 = sort_permutations([idxs1, idxs2])[1]
+            _lhs = access(_tn, updater, idxs_3...)
             block(s1..., assign(_lhs, +, rhs), s2..., s3...)
         end)
     ))(ex)
@@ -393,7 +395,6 @@ function is_base(cond)
 end
 
 
-# TODO: make sure that we keep canonical coordinates of output (replicate for non-canonical)
 # TODO: how to handle/mark fully_replicable case if there are multiple axes of output symmetry 
 # TODO: does being fully_replicable mean that there is only one entry in replicate dict
 """
@@ -464,7 +465,17 @@ function triangularize(ex, permutable_idxs, diagonals=true)
     return sieve(condition, ex)
 end
 
+
 # TODO: there should be a better/safer way to do this (e.g. somehow indicate nesting of ops) - something for future
+"""
+    consolidate_operators(ops)
+
+Given list of operators `ops`, each representing an expression of the form (j ops[i] k) for 
+1 <= i < length(ops), return operator for a singular expression (j `operator` k) that would
+satisfy the combination of expressions.
+
+Here, the combination of expressions is of the form (j ops[1] k) && ((j ops[2] k) || (j ops[3] k) ...)
+"""
 function consolidate_operators(ops)
     if all(op -> in(op, ops), [literal(<=), literal(!=)]) && length(ops) == 2
         return literal(<)
@@ -477,6 +488,13 @@ function consolidate_operators(ops)
     end
 end
 
+
+"""
+    consolidate_comparisons(conditions)
+
+Given a list of Finch boolean expressions `conditions`, return a single
+Finch boolean expression that satisfies all the conditions.
+"""
 function consolidate_comparisons(conditions)
     idx_comparisons = Dict()
 
@@ -501,8 +519,14 @@ function consolidate_comparisons(conditions)
     return length(conditions_2) == 1 ? conditions_2[1] : call(and, conditions_2...)
 end
 
+
 # TODO: still need to determine/evaluate when this is necessary/not necessary to do
-# TODO: docstrings for this & helpers
+"""
+    consolidate_conditions(ex)
+
+Reorganize sieve conditions and bodies in `ex` such that each update
+operate happens only once (no repeats).
+"""
 function consolidate_conditions(ex)
     conditions_map = Dict()
     @capture ex sieve(~base_condition, ~body)
@@ -531,13 +555,6 @@ function consolidate_conditions(ex)
     end
 
     return block(sieves...)
-end
-
-
-# TODO: implement
-function nest_conditions(ex)
-    # determine which conditions are nestable
-    # nest accordingly 
 end
 
 
