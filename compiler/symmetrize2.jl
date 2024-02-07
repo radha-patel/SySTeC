@@ -490,6 +490,17 @@ end
 
 
 """
+    sort_conditions(conds)
+
+Sort conditions comparing indices such that the first indices are in canonical order.
+"""
+sort_conditions = conds -> sort(conds, by=cond -> begin 
+    @capture cond call(~op, ~idx_1, ~idx_2)
+    idx_1.val
+end)
+
+
+"""
     consolidate_comparisons(conditions)
 
 Given a list of Finch boolean expressions `conditions`, return a single
@@ -516,6 +527,8 @@ function consolidate_comparisons(conditions)
         push!(conditions_2, call(op, idx[1], idx[2]))
     end
 
+    # TODO: sort conditions here
+    conditions_2 = sort_conditions(conditions_2)
     return length(conditions_2) == 1 ? conditions_2[1] : call(and, conditions_2...)
 end
 
