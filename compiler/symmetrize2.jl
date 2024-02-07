@@ -559,6 +559,18 @@ end
 
 
 """
+    conditions_count(ex)
+
+Returns the number of sieves in `ex`.
+"""
+function conditions_count(ex)
+    count = 0
+    Postwalk(@rule sieve(~cond, ~body) => begin count += 1 end)(ex)
+    return count
+end
+
+
+"""
     symmetrize2(ex, symmetric_tns)
 
     Rewrite ex to exploit symmetry in the tensors marked as symmetric in symmetric_tns
@@ -576,11 +588,9 @@ function symmetrize3(ex, symmetric_tns, diagonals=true)
     ex = group_assignments(ex)
     ex = exploit_output_replication(ex)
     ex = triangularize(ex, permutable_idxs[1], diagonals)
-    @info "before consolidating conditions"
-    display(ex)
-    ex = consolidate_conditions(ex)
+    ex_2 = consolidate_conditions(ex)
+    # TODO: maybe there is a better metric to determine which expression to keep?
+    ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
     ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
-    # TODO: compare # of conditions from before/after consolidate_conditions and keep version with less
-    @info "after consolidating conditions"
     display(ex)
 end
