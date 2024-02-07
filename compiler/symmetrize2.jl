@@ -424,7 +424,7 @@ end
 Replace multiple access to a tensor with a let statement outside block.
 """
 function consolidate_reads(ex)
-    Rewrite(Postwalk(@rule block(~s1...) => begin
+    Rewrite(Prewalk(@rule block(~s1...) => begin
         counts = Dict()
         ex = block(~s1...)
         for node in PostOrderDFS(block(~s1...)) 
