@@ -188,52 +188,117 @@ function add_updates(ex, conds, permutable_idxs, issymmetric)
 end
 
 
-#TODO: this step can probably be combined/happen within add_updates 
-#TODO: enumerate all permutations of b1_s and b2_s and check if pairs can be made the same
-function group_sieves(ex)
-    Rewrite(Postwalk(@rule block(~s1..., sieve(~c1, ~b1), ~s2..., sieve(~c2, ~b2), ~s3...) => begin
-        @capture b1 block(~b1_s...)
-        @capture b2 block(~b2_s...)
+# TODO: may need an additional layer of nesting here
+"""
+    get_possible_swaps(subsymmetry)
 
-        if length(b1_s) != length(b2_s)
+Given the subsymmetry of a tensor, return a list of lists consisting of the pairs
+of indices (i.e. equivalent indices) to access the same value of the tensor.
+"""
+function get_possible_swaps(subsymmetry)
+    swaps = []
+    for group in subsymmetry
+        append!(swaps, collect(combinations(group, 2)))
+    end
+    return swaps
+end
+
+
+"""
+    updates_count(body)
+
+Returns the number of updates that are performed in the expression `body`
+where an "update" consists of adding to the output at a particular coordinate
+the product of the input matrices for some set index values.  
+"""
+function updates_count(body)
+    count = 0
+    Postwalk(@rule assign(~lhs, +, ~rhs) => begin
+        if @capture rhs call(*, 2, ~rhs_2)
+            count += 2
+        else
+            count += 1
+        end
+    end)(body)
+    return count
+end
+
+
+"""
+    swap_indices(ex, idx_1, idx_2, issymmetric)
+
+Returns expression `ex` with all instances of indices `idx_1` and `idx_2` swapped.
+"""
+function swap_indices(ex, idx_1, idx_2, issymmetric) 
+    Rewrite(Postwalk(@rule access(~tn::((t) -> (!issymmetric(t))), ~mode, ~idxs...) => begin
+        swapped_idxs = deepcopy(idxs)
+        for i_1 in 1:length(idxs)
+            if idxs[i_1] == idx_1
+                swapped_idxs[i_1] = idx_2
+            elseif idxs[i_1] == idx_2
+                swapped_idxs[i_1] = idx_1
+            end
+        end
+        access(tn, mode, swapped_idxs...)
+    end))(ex)
+end
+
+
+#TODO: this step can probably be combined/happen within add_updates 
+"""
+    group_sieves(ex, issymmetric)
+
+Identifies where sieves that perform the same updates and groups them together. Returns
+a boolean representing whether any equivalent sieves were found and the resulting
+expression as a result of performing this transform. 
+"""
+function group_sieves(ex, issymmetric)
+    grouped = false
+    ex = Rewrite(Postwalk(@rule block(~s1..., sieve(~c1, ~b1), ~s2..., sieve(~c2, ~b2), ~s3...) => begin
+        if updates_count(b1) != updates_count(b2)
             return nothing
         end
 
-        # rewrite b1 and b2 using only canonical index of equivalent indices
         b1_subsymmetry = get_subsymmetry(c1)
         b2_subsymmetry = get_subsymmetry(c2)
 
-        b1_2 = b1
-        for group in b1_subsymmetry
-            for idx in group[2:end]
-                b1_2 = Rewrite(Postwalk(@rule ~idx_2::isindex => idx_2 == idx ? group[1] : idx_2))(b1_2)
+        b1_s = []
+        Postwalk(@rule assign(~lhs, +, ~rhs) => begin
+            if @capture rhs call(*, 2, ~rhs_2)
+                idx_1, idx_2 = b1_subsymmetry[1]
+                lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
+                rhs_3 = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
+                push!(b1_s, assign(lhs, +, rhs_2))
+                push!(b1_s, assign(lhs_swapped, +, normalize(rhs_3, issymmetric)))
+            else
+                push!(b1_s, assign(lhs, +, rhs))
+            end
+        end)(b1)
+
+        # TODO: DRY
+        b2_s = []
+        Postwalk(@rule assign(~lhs, +, ~rhs) => begin
+            if @capture rhs call(*, 2, ~rhs_2)
+                idx_1, idx_2 = b2_subsymmetry[1]
+                lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
+                rhs_3 = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
+                push!(b2_s, assign(lhs, +, rhs_2))
+                push!(b2_s, assign(lhs_swapped, +, normalize(rhs_3, issymmetric)))
+            else
+                push!(b2_s, assign(lhs, +, rhs))
+            end
+        end)(b2)
+
+        for b1_s_perm in permutations(b1_s)
+            if b1_s_perm == b2_s
+                grouped = true
+                return block(s1..., sieve(call(or, c1, c2), block(b1_s...)), s2..., s3...)
             end
         end
-
-        b2_2 = b2
-        for group in b2_subsymmetry
-            for idx in group[2:end]
-                b2_2 = Rewrite(Postwalk(@rule ~idx_2::isindex => idx_2 == idx ? group[1] : idx_2))(b2_2)
-            end
-        end
-        
-        # iterate through equivalent indices in b1 and rewrite b1 to include only one of index
-        # from each set of equivalent indices
-        for group in b1_subsymmetry
-            for idx in group[2:end]
-                b1_3 = Rewrite(Postwalk(@rule ~idx_2::isindex => idx_2 == group[1] ? idx : idx_2))(b1_2)
-                display(b1_3)
-                display(b2_2)
-                if b1_3 == b2_2 
-                    println("EQUIVALENT SIEVES FOUND")
-                end
-            end
-        end
-
-        #TODO: fix
-
+        # TODO: combine conditions here -> 1. maybe just throw in or and combine in another transform, or 2. "merge" here
+        # TODO: function to sort updates in alphabetical order (by the output coordinate that they update)
     end))(ex)
-    return nothing
+    return grouped, ex
 end
 
 
@@ -597,13 +662,15 @@ function symmetrize3(ex, symmetric_tns, diagonals=true)
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
     conditions = get_conditions(permutable_idxs[1], diagonals)
     ex = add_updates(ex, conditions, permutable_idxs[1], issymmetric)
-    # group_sieves(ex) # TODO: fix group_sieves
     ex = group_assignments(ex)
     ex = exploit_output_replication(ex)
+    grouped, ex = group_sieves(ex, issymmetric)
     ex = triangularize(ex, permutable_idxs[1], diagonals)
-    ex_2 = consolidate_conditions(ex)
-    # TODO: maybe there is a better metric to determine which expression to keep?
-    ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
+    if !grouped 
+        ex_2 = consolidate_conditions(ex)
+        # TODO: maybe there is a better metric to determine which expression to keep?
+        ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex 
+    end
     ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
     display(ex)
 end
