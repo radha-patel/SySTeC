@@ -244,11 +244,50 @@ function swap_indices(ex, idx_1, idx_2, issymmetric)
 end
 
 
+"""
+    are_updates_identical(updates_1, udpates_2) 
+
+Given lists of updates `updates_1` and `updates_2`, return whether the updates in 
+`updates_1` are some permutation of `updates_2``.
+"""
+function are_updates_identical(updates_1, udpates_2) 
+    for updates_1_perm in permutations(updates_1)
+        if updates_1_perm == udpates_2
+            return true
+        end
+    end
+    return false
+end
+
+
+"""
+    decouple_assignments(ex, subsymmetry)
+
+Upgroup groups of two assignments and rewrite one with a pair of equivalent indices
+swapped in all nonsymmetric tensors. Return list of resulting assignment expressions.
+"""
+function decouple_grouped_updates(ex, subsymmetry, issymmetric)
+    assignments = []
+    Postwalk(@rule assign(~lhs, +, ~rhs) => begin
+        if @capture rhs call(*, 2, ~rhs_2)
+            idx_1, idx_2 = subsymmetry[1] # TODO: what if we have a more complicated subsymmetry?
+            lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
+            rhs_3 = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
+            push!(assignments, assign(lhs, +, rhs_2))
+            push!(assignments, assign(lhs_swapped, +, normalize(rhs_3, issymmetric)))
+        else
+            push!(assignments, assign(lhs, +, rhs))
+        end
+    end)(ex)
+    return assignments
+end
+
+
 #TODO: this step can probably be combined/happen within add_updates 
 """
     group_sieves(ex, issymmetric)
 
-Identifies where sieves that perform the same updates and groups them together. Returns
+Identifies sieves that perform the same updates and groups them together. Returns
 a boolean representing whether any equivalent sieves were found and the resulting
 expression as a result of performing this transform. 
 """
@@ -262,41 +301,14 @@ function group_sieves(ex, issymmetric)
         b1_subsymmetry = get_subsymmetry(c1)
         b2_subsymmetry = get_subsymmetry(c2)
 
-        b1_s = []
-        Postwalk(@rule assign(~lhs, +, ~rhs) => begin
-            if @capture rhs call(*, 2, ~rhs_2)
-                idx_1, idx_2 = b1_subsymmetry[1]
-                lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
-                rhs_3 = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
-                push!(b1_s, assign(lhs, +, rhs_2))
-                push!(b1_s, assign(lhs_swapped, +, normalize(rhs_3, issymmetric)))
-            else
-                push!(b1_s, assign(lhs, +, rhs))
-            end
-        end)(b1)
+        b1_s = decouple_grouped_updates(b1, b1_subsymmetry, issymmetric)
+        b2_s = decouple_grouped_updates(b2, b2_subsymmetry, issymmetric)
 
-        # TODO: DRY
-        b2_s = []
-        Postwalk(@rule assign(~lhs, +, ~rhs) => begin
-            if @capture rhs call(*, 2, ~rhs_2)
-                idx_1, idx_2 = b2_subsymmetry[1]
-                lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
-                rhs_3 = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
-                push!(b2_s, assign(lhs, +, rhs_2))
-                push!(b2_s, assign(lhs_swapped, +, normalize(rhs_3, issymmetric)))
-            else
-                push!(b2_s, assign(lhs, +, rhs))
-            end
-        end)(b2)
-
-        for b1_s_perm in permutations(b1_s)
-            if b1_s_perm == b2_s
-                grouped = true
-                return block(s1..., sieve(call(or, c1, c2), block(b1_s...)), s2..., s3...)
-            end
+        if are_updates_identical(b1_s, b2_s)
+            grouped = true
+            return block(s1..., sieve(call(or, c1, c2), block(b1_s...)), s2..., s3...)
         end
         # TODO: combine conditions here -> 1. maybe just throw in or and combine in another transform, or 2. "merge" here
-        # TODO: function to sort updates in alphabetical order (by the output coordinate that they update)
     end))(ex)
     return grouped, ex
 end
