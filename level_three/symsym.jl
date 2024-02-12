@@ -36,19 +36,22 @@ eval(@finch_kernel mode=fastfinch function symsym_opt2(C, A, B)
     for j=_, k=_, i=_
         if i <= k && k <= j
             if i != k && k != j
-                C[i, j] += A[i, k] * B[k, j]
-                C[k, j] += A[k, i] * B[i, j]
-                C[i, k] += A[i, j] * B[j, k]
-                # what is the logic as to why we don't include the below case??
-                # C[k, k] += A[k, i] * B[j, k] 
+                C[i, j] += A[i, k] * B[k, j] 
+                C[k, j] += A[k, i] * B[i, j] 
+                C[i, k] += A[i, j] * B[j, k] 
+                C[k, i] += A[k, j] * B[j, i]
+                C[j, k] += A[j, i] * B[i, k] 
+                C[j, i] += A[j, k] * B[k, i]
             end
             if i == k && k != j
                 C[i, j] += A[i, k] * B[k, j]
                 C[i, k] += A[i, j] * B[j, k]
+                C[j, k] += A[j, i] * B[i, k] 
             end
             if i != k && k == j
                 C[i, j] += A[i, k] * B[k, j]
                 C[k, j] += A[k, i] * B[i, j]
+                C[k, i] += A[k, j] * B[j, i]
             end
             if i == k && k == j
                 C[i, j] += A[i, k] * B[k, j]
@@ -64,14 +67,8 @@ function main()
     @btime symsym_opt1($C, $A, $B)
     @info "check opt1" C == ref
 
-    check = Scalar(true)
     @btime symsym_opt2($C, $A, $B)
-    @finch for j=_, i=_
-        if i <= j
-            check[] &= C[i, j] == ref[i, j]
-        end
-    end
-    @info "check opt2" check[]
+    @info "check opt2" C == ref
 end
 
 main()

@@ -24,6 +24,8 @@ ex = @finch_program C[i, j, l] += A[i, k, j, l] * B[k, i]
 symmetrize(ex, [A])
 ex = @finch_program C[i, j] += A[i, k] * B[k, j]
 symmetrize(ex, [A, B])
+ex = @finch_program D[i, l] += A[i, k] * B[k, j] * C[j, l]
+symmetrize(ex, [A, B])
 
 """
 if i <= k
