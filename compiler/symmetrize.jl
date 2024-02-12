@@ -498,12 +498,55 @@ function exploit_output_replication(ex)
     end))(ex)
 end
 
+"""
+    get_tn_var_name(tn, idxs)
+
+Returns name of variable for value of `tn` at `idxs` coordinate. 
+"""
+get_tn_var_name(tn, idxs) = Symbol(tn.val, "_", join([idx.val for idx in idxs]))
+
+
+"""
+    op_str(op)
+
+Returns string representation of `op`.
+"""
+function op_str(op)
+    if op == literal(==)
+        return "eq"
+    elseif op == literal(!=)
+        return "neq"
+    elseif op == literal(<=)
+        return "leq"
+    elseif op == literal(<=)
+        return "lt"
+    else
+        throw(ArgumentError("Unexpected operator"))
+    end
+end
+    
+
+"""
+    get_comp_var_name(tn, idx_1, idx_2)
+
+Returns name of variable to represent comparison between `idx_1` and `idx_2` 
+"""
+function get_comp_var_name(op, idx_1, idx_2)
+    @capture idx_1 call(identity, ~idx_1)
+    @capture idx_2 call(identity, ~idx_2)
+    
+    Symbol(idx_1.val, idx_2.val, "_", op_str(op))
+end
+
 
 """
     consolidate_reads(ex)
 
-Replace multiple access to a tensor with a let statement outside block.
+Replace the following with a let statement outside block:
+    - multiple accesses to a tensor
+    - repetitions of a comparison 
 """
+# TODO: would be nice to put let statements on separate lines for readability
 function consolidate_reads(ex)
     Rewrite(Prewalk(@rule block(~s1...) => begin
         counts = Dict()
@@ -514,11 +557,20 @@ function consolidate_reads(ex)
         for (node, count) in counts
             if @capture(node, access(~tn, reader, ~idxs...)) && count > 1
                 ctx = JuliaContext()
-                var = freshen(ctx, get_var_name(tn, idxs))
+                var = freshen(ctx, get_tn_var_name(tn, idxs))
                 ex = Postwalk(@rule node => var)(ex)
                 ex = define(var, access(tn, reader, idxs...), ex)
             end
         end
+        for (node, count) in counts
+            if @capture(node, call(~op::is_comparison, ~idx_1, ~idx_2)) && count > 1
+                ctx = JuliaContext()
+                var = freshen(ctx, get_comp_var_name(op, idx_1, idx_2))
+                ex = Postwalk(@rule node => var)(ex)
+                ex = define(var, call(op, idx_1, idx_2), ex)
+            end
+        end
+        # TODO: how to best consolidate the other nodes?
         ex
     end))(ex)
 end
