@@ -7,8 +7,8 @@ n = 3
 M = rand(SymmetricTensor{Float64, 3}, n)
 # A = Fiber!(Dense(Dense(SparseList(Element(0.0)))), fsprand((n, n, n), 0.1))
 A = Fiber!(Dense(Dense(Dense(Element(0.0)))), Array(M))
-C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, 1, n)))
-X = Fiber!(Dense(Dense(Element(0.0))), rand(n, 1))
+C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, n, n)))
+X = Fiber!(Dense(Dense(Element(0.0))), rand(n, n))
 temp2 = Scalar(0.0)
 # TIME: ~12ms
 eval(@finch_kernel mode=fastfinch function n_mode_product(C, A, X, temp2) 
@@ -31,7 +31,7 @@ eval(@finch_kernel mode=fastfinch function n_mode_product(C, A, X, temp2)
 end)
 println("compiled n_mode_product")
 
-_C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, 1, n)))
+_C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, n, n)))
 # eval(@finch_kernel mode=fastfinch function n_mode_product2(C, A, X, temp2) 
 #     for l=_, j=_, i=_
 #         temp2 .= 0
@@ -88,24 +88,24 @@ eval(@finch_kernel mode=fastfinch function n_mode_product3(C, A, X, temp2, temp4
                 end
                 C[i, j, l] += temp2[]
             end
-            if i < l
-                for k=_
-                    if k <= i
-                        temp4[k] += A[k, i, l] * X[l, j]
-                    end
-                end
-            end
+            # if i < l
+            #     for k=_
+            #         if k <= i
+            #             temp4[k] += A[k, i, l] * X[l, j]
+            #         end
+            #     end
+            # end
         end
-        for k=_
-            if k <= i
-                C[k, j, i] += temp4[k]
-            end
-        end
+        # for k=_
+        #     if k <= i
+        #         C[k, j, i] += temp4[k]
+        #     end
+        # end
     end
 end)
 
-n_mode_product(C, A, X, temp2)
+@btime n_mode_product($C, $A, $X, $temp2)
 println("run n_mode_product")
-n_mode_product3(_C, A, X, temp2, temp4)
+@btime n_mode_product3($_C, $A, $X, $temp2, $temp4)
 println("run n_mode_product 2")
 C == _C

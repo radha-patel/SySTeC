@@ -69,13 +69,16 @@ eval(@finch_kernel mode=fastfinch function ssymv_opt3(y, A, x, temp)
         let x_j = x[j]
             temp .= 0
             for i=_
-                let A_ij = A[i, j]
-                    if i != j
-                        y[i] += A_ij * x_j 
-                        temp[] += A_ij * x[i]
-                    end
-                    if i == j
-                        y[i] += A_ij * x_j
+                if i <= j
+                    let A_ij = A[i, j], y_i = A_ij * x_j 
+                        if i != j
+                            y[i] += y_i
+                            temp[] += A_ij * x[i]
+                        end
+                        # TODO: benchmark this but with following segment w runtime compilation
+                        if i == j
+                            y[i] += y_i
+                        end
                     end
                 end
             end

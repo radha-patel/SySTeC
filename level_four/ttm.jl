@@ -2,25 +2,25 @@ using Finch
 using BenchmarkTools
 using SparseArrays
 
-n = 3
+n = 100
 
     triA = rand(Int, n, n, n)
     symA = [triA[sort([i, j, k])...] for i = 1:n, j = 1:n, k = 1:n]
     x = rand(Int, n, n)
 
     # To test with A actually being sparse 
-    # A = Fiber!(Dense(Dense(SparseList(Element(0)))), fsprand((n, n, n), 0.1))
+    # A = Tensor(Dense(Dense(SparseList(Element(0)))), fsprand((n, n, n), 0.1))
     # TODO: finish this
 
-    A = Fiber!(Dense(SparseList(SparseList(Element(0)))), symA)    
-    X = Fiber!(Dense(Dense(Element(0))), x)
-    X_T = Fiber!(Dense(Dense(Element(0))), transpose(x))
-    # C = Fiber!(Dense(Dense(Dense(Dense(Element(0))))), zeros(n, n, n, n))
-    # _C = Fiber!(Dense(Dense(Dense(Dense(Element(0))))), zeros(n, n, n, n))
-    C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
-    _C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
+    A = Tensor(Dense(SparseList(SparseList(Element(0)))), symA)    
+    X = Tensor(Dense(Dense(Element(0))), x)
+    X_T = Tensor(Dense(Dense(Element(0))), transpose(x))
+    # C = Tensor(Dense(Dense(Dense(Dense(Element(0))))), zeros(n, n, n, n))
+    # _C = Tensor(Dense(Dense(Dense(Dense(Element(0))))), zeros(n, n, n, n))
+    C = Tensor(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
+    _C = Tensor(Dense(Dense(Dense(Element(0)))), zeros(n, n, n))
     temp2 = Scalar(0)
-    temp4 = Fiber!(Dense(Element(0)), rand(Int, n))
+    temp4 = Tensor(Dense(Element(0)), rand(Int, n))
 
     # eval(@finch_kernel mode=fastfinch function mode2_product_ref(C, A, X)
     #     C .= 0
@@ -276,37 +276,93 @@ n = 3
     # end)
 
 
-    eval(@finch_kernel mode=fastfinch function mode1_product_opt5(C, A, X, X_T) 
+    # eval(@finch_kernel mode=fastfinch function mode1_product_opt5(C, A, X, X_T) 
+    #     C .= 0
+    #     for l=_, i=_
+    #         if i <= l
+    #             for k=_ 
+    #                 let temp3 = A[k, i, l]
+    #                     if k <= i
+    #                         for j=_
+    #                             C[j, k, l] += X_T[j, i] * temp3
+    #                             if i < l
+    #                                 C[j, k, i] += X_T[j, l] * temp3
+    #                             end
+    #                         end
+    #                     end
+    #                     if k < i
+    #                         for j=_
+    #                             C[j, i, l] += X_T[j, k] * temp3
+    #                         end
+    #                     end
+    #                 end
+    #             end
+    #         end
+    #     end
+    # end)
+
+    println("evaluating opt6")
+    eval(@finch_kernel mode=fastfinch function mode1_product_opt6(C, A, X) 
         C .= 0
-        for l=_, i=_
-            if i <= l
-                for k=_ 
-                    let temp3 = A[k, i, l]
-                        if k <= i
-                            for j=_
-                                # C[i, j, k, l] += X_T[j, i] * temp3
-                                C[j, k, l] += X_T[j, i] * temp3
-                                if i < l
-                                    # C[l, j, k, i] += X_T[j, l] * temp3
-                                    C[j, k, i] += X_T[j, l] * temp3
-                                end
-                            end
+        for l=_, k=_, j=_, i=_
+            let A_jkl = A[j, k, l]
+                if j <= k && k <= l 
+                    C[i, j, l] += X[i, k] * A_jkl
+                end
+                if j < k && k <= l
+                    C[i, k, l] += A_jkl * X[i, j]
+                end
+                if j <= k && k < l 
+                    C[i, j, k] += X[i, l] * A_jkl
+                end
+            end
+        end
+    end)
+    println("done evaluating opt6")
+
+    println("evaluating opt7")
+    eval(@finch_kernel mode=fastfinch function mode1_product_opt7(C, A, X) 
+        C .= 0
+        for l=_, k=_, j=_, i=_
+            let A_jkl = A[j, k, l], j_leq_k = (j <= k), k_leq_l = (k <= l)
+                if j_leq_k && k_leq_l
+                    C[i, j, l] += X[i, k] * A_jkl
+                end
+                if j < k && k_leq_l
+                    C[i, k, l] += A_jkl * X[i, j]
+                end
+                if j_leq_k && k < l 
+                    C[i, j, k] += X[i, l] * A_jkl
+                end
+            end
+        end
+    end)
+    println("done evaluating opt7")
+
+    println("evaluating opt8")
+    eval(@finch_kernel mode=fastfinch function mode1_product_opt8(C, A, X) 
+        C .= 0
+        for l=_, k=_, j=_, i=_
+            let A_jkl = A[j, k, l]
+                if k <= l
+                    if j <= k
+                        C[i, j, l] += X[i, k] * A_jkl
+                        if k < l
+                            C[i, j, k] += X[i, l] * A_jkl
                         end
-                        if k < i
-                            for j=_
-                                # C[k, j, i, l] += X_T[j, k] * temp3
-                                C[j, i, l] += X_T[j, k] * temp3
-                            end
-                        end
+                    end
+                    if j < k
+                        C[i, k, l] += A_jkl * X[i, j]
                     end
                 end
             end
         end
     end)
+    println("done evaluating opt8")
 
 function main()
     # MODE 2
-    # ref = Fiber!(Dense(Dense(Dense(Element(0), n), n), n))
+    # ref = Tensor(Dense(Dense(Dense(Element(0), n), n), n))
     # @btime mode2_product_ref($ref, $A, $X)
 
     # @btime mode2_product_opt1($C, $A, $X, $temp2)
@@ -354,8 +410,8 @@ function main()
     # @info "check" check[]
 
     # MODE 1
-    # ref = Fiber!(Dense(Dense(Dense(Dense(Element(0), n), n), n), n))
-    ref = Fiber!(Dense(Dense(Dense(Element(0), n), n), n))
+    # ref = Tensor(Dense(Dense(Dense(Dense(Element(0), n), n), n), n))
+    ref = Tensor(Dense(Dense(Dense(Element(0), n), n), n))
     @btime mode1_product_ref($ref, $A, $X)
 
     # @btime mode1_product_opt1($C, $A, $X, $temp2)
@@ -382,18 +438,18 @@ function main()
     # end
     # @info "check" check[]
 
-    @btime mode1_product_opt5($C, $A, $X, $X_T)
+    # @btime mode1_product_opt5($C, $A, $X, $X_T)
+    # check = Scalar(true)
+    # @finch for l=_, j=_, i=_
+    #     if j <= l
+    #         check[] &= C[i, j, l] == ref[i, j, l]
+    #     end
+    # end
+    # @info "check" check[]
 
-    check = Scalar(true)
-    # @finch for l=_, k=_, j=_, i=_
-    @finch for l=_, j=_, i=_
-        # if l <= j
-        if j <= l
-            # check[] &= C[k, i, l, j] == ref[i, j, k, l]
-            check[] &= C[i, j, l] == ref[i, j, l]
-        end
-    end
-    @info "check" check[]
+    @btime mode1_product_opt6($C, $A, $X)
+    @btime mode1_product_opt7($C, $A, $X)
+    @btime mode1_product_opt8($C, $A, $X)
 end
 
 main()
