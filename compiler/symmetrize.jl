@@ -133,6 +133,10 @@ function get_permutations(idxs, subsymmetry)
 end
 
 
+# TODO: docstrings / reorganize
+is_index(ex::FinchNode) = ex.kind === index
+is_commutative(op) = typeof(op.val) == typeof(*) ? true : false
+
 """
     permute_indices(ex, idxs, permutations)
 
@@ -162,7 +166,7 @@ function normalize(ex, issymmetric)
         # Sort indices of symmetric matrices in canonical order (alphabetical)
         (@rule access(~tn::issymmetric, ~mode, ~idxs...) => access(tn, mode, order_canonically(idxs)...)),
         # Sort operands in canonical order
-        (@rule call(~op::iscommutative, ~tns...) => call(op, sort(tns, by = tn->hash(tn))...))
+        (@rule call(~op::is_commutative, ~tns...) => call(op, sort(tns, by = tn->hash(tn))...))
     ])))
     _normalize(ex)
 end
