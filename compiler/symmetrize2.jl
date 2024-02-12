@@ -143,7 +143,7 @@ permutations[i][j]
 function permute_indices(ex, idxs, permutations)
     permuted_exs = []
     for perm in permutations
-        ex_2 = Rewrite(Postwalk(@rule ~idx::isindex => begin
+        ex_2 = Rewrite(Postwalk(@rule ~idx::is_index => begin
             idx in idxs ? perm[findfirst(i -> i == idx, idxs)] : idx
         end))(ex)
         push!(permuted_exs, ex_2)
@@ -457,14 +457,16 @@ end
 """
     is_base(cond)
 
-Returns boolean representing whether `cond` is an expression with only != relations.
+Returns boolean representing whether `cond` is an expression that restricts updates to only
+non-diagonal coordinates of output.
 """
 function is_base(cond)
-    if !(@capture cond call(and, ~conds...))
-        conds = [cond]
-    end
+    conds = []
+    Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
+        push!(conds, call(op, idx_1, idx_2))
+    end)(cond)
     for cond in conds
-        if @capture cond call(==, ~a, ~b)
+        if (@capture cond call(==, ~a, ~b)) || (@capture cond call(<=, ~a, ~b))
             return false
         end
     end
@@ -649,6 +651,48 @@ end
 
 
 """
+    insert_loops(ex, idxs)
+
+Wrap `ex` with loop with indices in `idxs` in order.  
+"""
+function insert_loops(ex, idxs)
+    ex_with_loops = ex
+    for idx in idxs
+        ex_with_loops = loop(idx, virtual(Dimensionless()), ex_with_loops)
+    end
+    return ex_with_loops
+end
+
+
+"""
+    is_comparison(op)
+
+Returns whether `op` is a comparison operator.
+"""
+is_comparison(op) = op in [literal(<), literal(<=), literal(!=), literal(==)]
+
+
+"""
+    insert_identity(ex)
+
+Inserts identity() wrapper around all indices in `ex` that correspond to a comparison done
+for a diagonal-related update.
+"""
+function insert_identity(ex)
+    if @capture ex sieve(~triangular_condition, ~ex_2)
+        ex_2 = Rewrite(Postwalk(@rule sieve(~cond::((c) -> !is_base(c)), ~body) => begin
+            cond = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
+                call(op, call(identity, idx_1), call(identity, idx_2))
+            end))(cond)
+            sieve(cond, body)
+        end))(ex_2)
+        ex = sieve(triangular_condition, ex_2)
+    end
+    ex 
+end
+
+
+"""
     conditions_count(ex)
 
 Returns the number of sieves in `ex`.
@@ -682,7 +726,10 @@ function symmetrize3(ex, symmetric_tns, diagonals=true)
         ex_2 = consolidate_conditions(ex)
         # TODO: maybe there is a better metric to determine which expression to keep?
         ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex 
+    else
+        ex = insert_identity(ex)
     end
     ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
+    ex = insert_loops(ex, permutable_idxs[1])
     display(ex)
 end
