@@ -653,11 +653,16 @@ end
 """
     insert_loops(ex, idxs)
 
-Wrap `ex` with loop with indices in `idxs` in order.  
+Wrap `ex` with loop with all indices.
 """
-function insert_loops(ex, idxs)
+# TODO: how to optimally order indices? should we be interspersing non_permutable_idxs in permutable_idxs
+function insert_loops(ex, permutable_idxs)
+    permutable_idxs = order_canonically(permutable_idxs)
+    all_idxs = get_idxs(ex)
+    non_permutable_idxs = idxs_not_in_set(all_idxs, permutable_idxs)
+    all_idxs = vcat(non_permutable_idxs, permutable_idxs)
     ex_with_loops = ex
-    for idx in idxs
+    for idx in all_idxs
         ex_with_loops = loop(idx, virtual(Dimensionless()), ex_with_loops)
     end
     return ex_with_loops
@@ -704,11 +709,22 @@ function conditions_count(ex)
 end
 
 
+function get_idxs(ex)
+    s = Set()
+    Postwalk(@rule ~idx::is_index => push!(s, idx))(ex)
+    return s
+end
+
+function idxs_not_in_set(s, idxs)
+    return [idx for idx in s if !(idx in idxs)]
+end
+
 """
     symmetrize2(ex, symmetric_tns)
 
     Rewrite ex to exploit symmetry in the tensors marked as symmetric in symmetric_tns
 """
+# TODO: transpose some tensors?
 function symmetrize3(ex, symmetric_tns, diagonals=true)
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
