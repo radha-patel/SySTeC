@@ -518,7 +518,7 @@ function op_str(op)
         return "neq"
     elseif op == literal(<=)
         return "leq"
-    elseif op == literal(<=)
+    elseif op == literal(<)
         return "lt"
     else
         throw(ArgumentError("Unexpected operator"))
