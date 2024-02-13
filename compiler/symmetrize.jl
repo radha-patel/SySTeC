@@ -782,6 +782,7 @@ end
 """
 # TODO: transpose some tensors?
 # TODO: option to generate code to initialize tensors 
+# TODO: stress testing - for what sizes/complexities of tensors/kernels does this work?
 function symmetrize(ex, symmetric_tns, diagonals=true)
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
