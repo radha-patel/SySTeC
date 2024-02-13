@@ -2,6 +2,7 @@
 A = :A
 B = :B
 C = :C
+D = :D
 i = index(:i)
 j = index(:j)
 k = index(:k)
@@ -25,19 +26,4 @@ symmetrize(ex, [A])
 ex = @finch_program C[i, j] += A[i, k] * B[k, j]
 symmetrize(ex, [A, B])
 ex = @finch_program D[i, l] += A[i, k] * B[k, j] * C[j, l]
-symmetrize(ex, [A, B])
-
-"""
-if i <= k
-    if k <= j
-        C[i, j] += A[i, k] * B[k, j]
-    if k < j 
-        C[i, k] += A[i, j] * B[k, j]
-if i < k
-    C[k, j] += A[i, k] * B[i, j]
-
-if k <= j
-    C[i, j] += A[i, k] * B[k, j]
-if k < j
-    C[i, k] += A[i, j] * B[k, j]
-"""
+symmetrize(ex, [A, B, C])

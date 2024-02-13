@@ -781,19 +781,25 @@ end
     Rewrite ex to exploit symmetry in the tensors marked as symmetric in symmetric_tns
 """
 # TODO: transpose some tensors?
+# TODO: option to generate code to initialize tensors 
 function symmetrize(ex, symmetric_tns, diagonals=true)
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
 
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
 
+    # TODO: given multiple symmetric matrices, how many is it worth optimizing for
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
-    conditions = get_conditions(permutable_idxs[1], diagonals)
-    ex = add_updates(ex, conditions, permutable_idxs[1], issymmetric)
+    permutable_idxs = collect(Set(Iterators.flatten(permutable_idxs)))
+
+    conditions = get_conditions(permutable_idxs, diagonals)
+    ex = add_updates(ex, conditions, permutable_idxs, issymmetric)
     ex = group_assignments(ex)
     ex = exploit_output_replication(ex)
+    # TODO: grouping takes a LONG time - constrain when we actually do this?
     grouped, ex = group_sieves(ex, issymmetric)
-    ex = triangularize(ex, permutable_idxs[1], diagonals)
+    # grouped = false
+    ex = triangularize(ex, permutable_idxs, diagonals)
     if !grouped 
         ex_2 = consolidate_conditions(ex)
         # TODO: maybe there is a better metric to determine which expression to keep?
@@ -802,6 +808,6 @@ function symmetrize(ex, symmetric_tns, diagonals=true)
         ex = insert_identity(ex)
     end
     ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
-    ex = insert_loops(ex, permutable_idxs[1])
+    ex = insert_loops(ex, permutable_idxs)
     display(ex)
 end
