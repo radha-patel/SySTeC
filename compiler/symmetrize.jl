@@ -707,18 +707,21 @@ end
 
 
 """
-    insert_loops(ex, idxs)
+    insert_loops(ex, idxs, loop_order)
 
 Wrap `ex` with loop with all indices.
 """
 # TODO: how to optimally order indices? should we be interspersing non_permutable_idxs in permutable_idxs
-function insert_loops(ex, permutable_idxs)
-    permutable_idxs = order_canonically(permutable_idxs)
-    all_idxs = get_idxs(ex)
-    non_permutable_idxs = idxs_not_in_set(all_idxs, permutable_idxs)
-    all_idxs = vcat(non_permutable_idxs, permutable_idxs)
+function insert_loops(ex, permutable_idxs, loop_order = [])
+    if isempty(loop_order)
+        permutable_idxs = order_canonically(permutable_idxs)
+        all_idxs = get_idxs(ex)
+        non_permutable_idxs = idxs_not_in_set(all_idxs, permutable_idxs)
+        loop_order = vcat(non_permutable_idxs, permutable_idxs)
+    end
+
     ex_with_loops = ex
-    for idx in all_idxs
+    for idx in loop_order
         ex_with_loops = loop(idx, virtual(Dimensionless()), ex_with_loops)
     end
     return ex_with_loops
@@ -811,7 +814,7 @@ function transpose_operands(ex, issymmetric, loop_order)
     count = 0
     rhs = Rewrite(Postwalk(@rule access(~tn::((t) -> !issymmetric(t)), ~mode, ~idxs...) => begin
         idxs_depths = [(findfirst(x -> x == idx, loop_order), idx) for idx in idxs]
-        transposed_idxs = [tup[2] for tup in sort(idxs_depths, rev=true)]
+        transposed_idxs = [tup[2] for tup in sort(idxs_depths)]
         swaps = Set(find_swaps(idxs, transposed_idxs))
 
         if isempty(swaps)
@@ -846,6 +849,8 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
 
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
     if !isempty(loop_order)
+        all_idxs = get_idxs(ex)
+        @assert all_idxs == Set(loop_order) "loop order does not include all indices"
         ex, transposed = transpose_operands(ex, issymmetric, loop_order)
     end
 
@@ -869,6 +874,6 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
         ex = insert_identity(ex)
     end
     ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
-    ex = insert_loops(ex, permutable_idxs)
+    ex = insert_loops(ex, permutable_idxs, loop_order)
     display(ex)
 end
