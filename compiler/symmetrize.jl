@@ -765,14 +765,71 @@ function conditions_count(ex)
 end
 
 
+"""
+    get_idxs(ex)
+
+Returns set of all indices in `ex`.
+"""
 function get_idxs(ex)
     s = Set()
     Postwalk(@rule ~idx::is_index => push!(s, idx))(ex)
     return s
 end
 
+
+"""
+    idxs_not_in_set(s, idxs)
+
+Returns list of indices in `s` that are not in `idxs`
+"""
 function idxs_not_in_set(s, idxs)
     return [idx for idx in s if !(idx in idxs)]
+end
+
+
+"""
+    get_transposed_tn_name(tn, count)
+
+Return new name for the `count`-th transposed form of tensor `tn`.
+"""
+get_transposed_tn_name(tn, count) = count == 1 ? Symbol(tn.val, "_T") : Symbol(tn.val, "_T", "_", count)
+
+
+"""
+    transpose_operands(ex, issymmetric, loop_order)
+
+Returns `ex` with nonsymmetric operands transposed such that accesses are concordant with
+loop order and dictionary mapping tuples of the form `(tn, swaps)` to the new name of the 
+transposed tensor where `tn` is the name of the original tensor and `swaps` is a list of 
+lists of length two corresponding to the indices that need to be transposed in `tn` to get
+the new tensor.
+"""
+function transpose_operands(ex, issymmetric, loop_order)
+    @capture ex assign(access(~lhs, ~updater, ~idxs...), ~op, ~rhs)
+
+    transposed = Dict()
+    count = 0
+    rhs = Rewrite(Postwalk(@rule access(~tn::((t) -> !issymmetric(t)), ~mode, ~idxs...) => begin
+        idxs_depths = [(findfirst(x -> x == idx, loop_order), idx) for idx in idxs]
+        transposed_idxs = [tup[2] for tup in sort(idxs_depths, rev=true)]
+        swaps = Set(find_swaps(idxs, transposed_idxs))
+
+        if isempty(swaps)
+            return nothing
+        end
+
+        if haskey(transposed, (tn, swaps))
+            new_tn = transposed[(tn, swaps)]
+        else
+            count += 1
+            new_tn = get_transposed_tn_name(tn, count)
+            transposed[(tn, swaps)] = new_tn
+        end
+        return access(new_tn, mode, transposed_idxs...)
+    end))(rhs)
+
+    ex = assign(access(lhs, updater, idxs...), op, rhs)
+    return ex, transposed
 end
 
 """
@@ -783,11 +840,14 @@ end
 # TODO: transpose some tensors?
 # TODO: option to generate code to initialize tensors 
 # TODO: stress testing - for what sizes/complexities of tensors/kernels does this work?
-function symmetrize(ex, symmetric_tns, diagonals=true)
+function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
 
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
+    if !isempty(loop_order)
+        ex, transposed = transpose_operands(ex, issymmetric, loop_order)
+    end
 
     # TODO: given multiple symmetric matrices, how many is it worth optimizing for
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
