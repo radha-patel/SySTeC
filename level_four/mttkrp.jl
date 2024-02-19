@@ -327,7 +327,7 @@ n = 100
 
     check = Scalar(true)
     @finch for j=_, i=_
-        check[] &= ref_diag[i, j] + ref_nondiag[i, j] == ref[i, j]
+        check[] &= (2 * C[j, i]) + C_diagonals[j, i] == ref[i, j]
     end
     @info "check" check[]
 

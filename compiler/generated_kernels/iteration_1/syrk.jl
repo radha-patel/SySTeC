@@ -17,6 +17,7 @@ for j=1:n, i=1:n
 end
 
 A = Tensor(Dense(SparseList(Element(0))), symA)
+A_dense = Tensor(Dense(Dense(Element(0))), symA)
 A_diag = Tensor(Dense(SparseList(Element(0))), diagA)
 A_nondiag = Tensor(Dense(SparseList(Element(0))), nondiagA)
 C = Tensor(Dense(Dense(Element(0))), zeros(Int, n, n))
@@ -51,7 +52,7 @@ end)
 #     end
 # end)
 
-println("before eval")
+println("before eval opt1")
 # ~1.6s
 eval(@finch_kernel mode=fastfinch function syrk_opt1(C, A)
     C .= 0
@@ -71,14 +72,14 @@ eval(@finch_kernel mode=fastfinch function syrk_opt1(C, A)
         end
     end
 end)
-println("after eval")
+println("after eval opt1")
 
-println("before eval")
-# ~1.5ms
-eval(@finch_kernel mode=fastfinch function syrk_opt2(C, A_diag)
+println("before eval opt2")
+# ~190ms
+eval(@finch_kernel mode=fastfinch function syrk_opt2(C, A_nondiag)
     C .= 0
     for k=_, j=_, i=_
-        let A_jk = A_diag[j, k], A_ik = A_diag[i, k], A_ij = A_diag[i, j]
+        let A_jk = A_nondiag[j, k], A_ik = A_nondiag[i, k], A_ij = A_nondiag[i, j]
             if i < j && j < k
                 C[i, j] += A_jk * A_ik
                 C[i, k] += A_jk * A_ij
@@ -87,13 +88,13 @@ eval(@finch_kernel mode=fastfinch function syrk_opt2(C, A_diag)
         end
     end
 end)
-println("after eval")
+println("after eval opt2")
 
-println("before eval")
-# ~1.1s
-eval(@finch_kernel mode=fastfinch function syrk_opt2_1(C, A_nondiag)
+println("before eval opt2_1")
+# ~2.4s
+eval(@finch_kernel mode=fastfinch function syrk_opt2_1(C, A_diag)
     for k=_, j=_, i=_
-        let A_jk = A_nondiag[j, k], A_ik = A_nondiag[i, k], A_ij = A_nondiag[i, j]
+        let A_jk = A_diag[j, k], A_ik = A_diag[i, k], A_ij = A_diag[i, j]
             let ij_neq = (identity(i) != identity(j)), jk_neq = (identity(j) != identity(k)), ij_eq = (identity(i) == identity(j)), jk_eq = (identity(j) == identity(k))
                 if identity(i) <= identity(j) && identity(j) <= identity(k)
                     if ij_eq && jk_neq
@@ -112,9 +113,10 @@ eval(@finch_kernel mode=fastfinch function syrk_opt2_1(C, A_nondiag)
         end
     end
 end)
-println("after eval")
+println("after eval opt2_1")
 
 # ~7.0ms
+println("before eval opt3")
 eval(@finch_kernel mode=fastfinch function syrk_opt3(C, A)
     C .= 0
     for j=_, k=_, i=_
@@ -123,6 +125,51 @@ eval(@finch_kernel mode=fastfinch function syrk_opt3(C, A)
         end
     end
 end)
+println("after eval opt3")
+
+# ~280ms
+println("after eval opt4")
+eval(@finch_kernel mode=fastfinch function syrk_opt4(C, A_dense)
+    C .= 0
+    for j=_, k=_, i=_
+        let jk_leq = (j <= k), ij_leq = (i <= j)
+            let A_ij = A_dense[i, j], A_ik = A_dense[i, k], A_jk = A_dense[j, k]
+                if ij_leq && jk_leq
+                    C[i, j] += A_jk * A_ik
+                end
+                if ij_leq && j < k
+                    C[i, k] += A_jk * A_ij
+                end
+                if i < j && jk_leq 
+                    C[j, k] += A_ik * A_ij
+                end
+            end
+        end
+    end
+end)
+println("after eval opt4")
+
+# ~200ms
+println("after eval opt4_1")
+eval(@finch_kernel mode=fastfinch function syrk_opt4_1(C, A, A_dense)
+    C .= 0
+    for j=_, k=_, i=_
+        let jk_leq = (j <= k), ij_leq = (i <= j)
+            let A_ij = A[i, j], A_ik = A_dense[i, k], A_jk = A_dense[j, k]
+                if ij_leq && jk_leq
+                    C[i, j] += A_jk * A_ik
+                end
+                if ij_leq && j < k
+                    C[i, k] += A_jk * A_ij
+                end
+                if i < j && jk_leq 
+                    C[j, k] += A_ik * A_ij
+                end
+            end
+        end
+    end
+end)
+println("after eval opt4_1")
 
 function main()
     # ref = Tensor(Dense(Dense(Element(0))), zeros(n, n))
@@ -145,10 +192,10 @@ function main()
         end
     end
     # Sometimes doesn't match ref because of overflow errors?
-    @info "check optimized code" check[]
+    @info "check optimized code (1)" check[]
 
-    @btime(syrk_opt2($C, $A_diag))
-    @btime(syrk_opt2_1($C, $A_nondiag))
+    @btime(syrk_opt2($C, $A_nondiag))
+    @btime(syrk_opt2_1($C, $A_diag))
     check = Scalar(true)
     @finch for j=_, i=_
         if i <= j
@@ -156,7 +203,7 @@ function main()
         end
     end
     # Sometimes doesn't match ref because of overflow errors?
-    @info "check optimized code" check[]
+    @info "check optimized code (2)" check[]
 
     @btime(syrk_opt3($C, $A))
     check = Scalar(true)
@@ -165,7 +212,25 @@ function main()
             check[] &= C[i, j] == ref[i, j]
         end
     end
-    @info "check optimized code" check[]
+    @info "check optimized code (3)" check[]
+
+    @btime(syrk_opt4($C, $A_dense))
+    check = Scalar(true)
+    @finch for j=_, i=_
+        if i <= j
+            check[] &= C[i, j] == ref[i, j]
+        end
+    end
+    @info "check optimized code (4)" check[]
+
+    @btime(syrk_opt4_1($C, $A, $A_dense))
+    check = Scalar(true)
+    @finch for j=_, i=_
+        if i <= j
+            check[] &= C[i, j] == ref[i, j]
+        end
+    end
+    @info "check optimized code (4.1)" check[]
 end
 
 main()
