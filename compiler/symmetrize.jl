@@ -548,7 +548,7 @@ end
 
 Replace the following with a let statement outside block:
     - multiple accesses to a tensor
-    - repetitions of a comparison 
+    - repetitions of a comparison (including the negation)
 """
 # TODO: would be nice to put let statements on separate lines for readability
 function consolidate_reads(ex)
@@ -571,6 +571,10 @@ function consolidate_reads(ex)
                 ctx = JuliaContext()
                 var = freshen(ctx, get_comp_var_name(op, idx_1, idx_2))
                 ex = Postwalk(@rule node => var)(ex)
+                if is_eq_op(op) 
+                    negation = call(literal(!=), idx_1, idx_2)
+                    ex = Postwalk(@rule negation => call(literal(!=), var))(ex)
+                end
                 ex = define(var, call(op, idx_1, idx_2), ex)
             end
         end
@@ -731,9 +735,17 @@ end
 """
     is_comparison(op)
 
-Returns whether `op` is a comparison operator.
+Returns whether `op` is a comparison operator (not including negations -- e.g. !=).
 """
-is_comparison(op) = op in [literal(<), literal(<=), literal(!=), literal(==)]
+is_comparison(op) = op in [literal(<), literal(<=), literal(==)]
+
+
+"""
+    is_eq_op(op)
+
+Returns whether `op` is a an == operator.
+"""
+is_eq_op(op) = op == literal(==)
 
 
 """
@@ -870,8 +882,8 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
         ex_2 = consolidate_conditions(ex)
         # TODO: maybe there is a better metric to determine which expression to keep?
         ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex 
-    else
-        ex = insert_identity(ex)
+    # else
+    #     ex = insert_identity(ex)
     end
     ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
     ex = insert_loops(ex, permutable_idxs, loop_order)
