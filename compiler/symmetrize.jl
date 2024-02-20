@@ -640,6 +640,25 @@ end)
 
 
 """
+    make_strict(cond)
+
+For a condition expression of the form `idx_1 <= idx_2 <= idx_3 ...` returns equivalent
+expression but with all unstrict inequalities made strict.
+"""
+function make_strict(cond)
+    if !(@capture cond call(and, ~conds...))
+        conds = [cond]
+    end
+    strict_conds = []
+    for cond in conds 
+        @capture cond call(<=, ~idx_1, ~idx_2)
+        push!(strict_conds, call(<, idx_1, idx_2))
+    end
+    return length(strict_conds) == 1 ? strict_conds[1] : call(and, strict_conds...)
+end
+
+
+"""
     consolidate_comparisons(conditions)
 
 Given a list of Finch boolean expressions `conditions`, return a single
@@ -777,16 +796,17 @@ of the symmetric tensors and the second expression uses the values on the diagon
 function separate_loop_nests(ex)
     base = []
     edge = []
-    if @capture ex sieve(~triangular_condition, ~ex_2)
+    if @capture ex sieve(~triangle_cond, ~ex_2)
         Postwalk(@rule sieve(~cond, ~body) => begin 
             if is_base(cond)
-                push!(base, sieve(triangular_condition, body))
+                strict_triangle_cond = make_strict(triangle_cond)
+                push!(base, sieve(strict_triangle_cond, body))
             else
                 push!(edge, sieve(cond, body))
             end
         end)(ex_2)
     end
-    block(base...), block(sieve(triangular_condition, block(edge...)))
+    block(base...), block(sieve(triangle_cond, block(edge...)))
 end
 
 
