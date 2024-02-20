@@ -775,11 +775,8 @@ for a diagonal-related update.
 """
 function insert_identity(ex)
     if @capture ex sieve(~triangular_condition, ~ex_2)
-        ex_2 = Rewrite(Postwalk(@rule sieve(~cond::((c) -> !is_base(c)), ~body) => begin
-            cond = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
-                call(op, call(identity, idx_1), call(identity, idx_2))
-            end))(cond)
-            sieve(cond, body)
+        ex_2 = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
+            call(op, call(identity, idx_1), call(identity, idx_2))
         end))(ex_2)
         ex = sieve(triangular_condition, ex_2)
     end
@@ -806,7 +803,7 @@ function separate_loop_nests(ex)
             end
         end)(ex_2)
     end
-    block(base...), block(sieve(triangle_cond, block(edge...)))
+    base[1], sieve(triangle_cond, block(edge...))
 end
 
 
@@ -931,10 +928,10 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
         ex_base, ex_edge = separate_loop_nests(ex)
         ex_base = consolidate_reads(ex_base)
         ex_edge = consolidate_reads(ex_edge)
+        ex_edge = insert_identity(ex_edge)
         ex_base = insert_loops(ex_base, permutable_idxs, loop_order)
         ex_edge = insert_loops(ex_edge, permutable_idxs, loop_order)
         display(ex_base)
         display(ex_edge)
-        # ex = insert_identity(ex)
     end
 end
