@@ -769,6 +769,28 @@ end
 
 
 """
+    separate_loop_nests(ex)
+
+Returns two expressions, where first expression uses the values on the nondiagonals
+of the symmetric tensors and the second expression uses the values on the diagonals.
+"""
+function separate_loop_nests(ex)
+    base = []
+    edge = []
+    if @capture ex sieve(~triangular_condition, ~ex_2)
+        Postwalk(@rule sieve(~cond, ~body) => begin 
+            if is_base(cond)
+                push!(base, sieve(triangular_condition, body))
+            else
+                push!(edge, sieve(cond, body))
+            end
+        end)(ex_2)
+    end
+    block(base...), block(sieve(triangular_condition, block(edge...)))
+end
+
+
+"""
     conditions_count(ex)
 
 Returns the number of sieves in `ex`.
@@ -881,11 +903,18 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
     if !grouped 
         ex_2 = consolidate_conditions(ex)
         # TODO: maybe there is a better metric to determine which expression to keep?
-        ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex 
-    # else
-    #     ex = insert_identity(ex)
+        ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
+        ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
+        ex = insert_loops(ex, permutable_idxs, loop_order)
+        display(ex) 
+    else
+        ex_base, ex_edge = separate_loop_nests(ex)
+        ex_base = consolidate_reads(ex_base)
+        ex_edge = consolidate_reads(ex_edge)
+        ex_base = insert_loops(ex_base, permutable_idxs, loop_order)
+        ex_edge = insert_loops(ex_edge, permutable_idxs, loop_order)
+        display(ex_base)
+        display(ex_edge)
+        # ex = insert_identity(ex)
     end
-    ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
-    ex = insert_loops(ex, permutable_idxs, loop_order)
-    display(ex)
 end
