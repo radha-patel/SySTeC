@@ -7,7 +7,7 @@ using BenchmarkTools
 A = Fiber!(Dense(SparseList(Element(0.0))), fsprand((10000, 10000), 0.1))
 C = Fiber!(Dense(Dense(Element(0.0))), zeros(10000, 10000))
 w = Fiber!(Dense(Dense(Element(0.0))), zeros(10000, 10000))
-eval(@finch_kernel mode=fastfinch function ssyrk_dense(C, A, w) 
+eval(@finch_kernel mode=:fast function ssyrk_dense(C, A, w) 
     for l = _, j = _
         let temp1 = A[j, l]
             for i = _
@@ -37,7 +37,7 @@ end)
 # C = Fiber!(Dense(SparseList(Element(0.0))), zeros(10, 10))
 # c = Fiber!(SparseHash{2}(Element(0.0)), zeros(10, 10))
 # w = Fiber!(SparseHash{2}(Element(0.0)), zeros(10, 10))
-# eval(@finch_kernel mode=fastfinch function ssyrk_sparse(C, A, w, c) 
+# eval(@finch_kernel mode=:fast function ssyrk_sparse(C, A, w, c) 
 #     c .= 0
 #     for l = _, j = _
 #         let temp1 = A[j, l]

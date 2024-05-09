@@ -12,14 +12,14 @@ B = Tensor(Dense(Dense(Element(0))), symB)
 C = Tensor(Dense(Dense(Element(0))), zeros(n, n))
 ref = Tensor(Dense(Dense(Element(0))), zeros(n, n))
 
-eval(@finch_kernel mode=fastfinch function symsym_ref(C, A, B)
+eval(@finch_kernel mode=:fast function symsym_ref(C, A, B)
     C .= 0
     for j=_, k=_, i=_
         C[i, j] += A[i, k] * B[k, j]
     end
 end)
 
-eval(@finch_kernel mode=fastfinch function symsym_opt1(C, A, B)
+eval(@finch_kernel mode=:fast function symsym_opt1(C, A, B)
     C .= 0
     for j=_, k=_, i=_
         if i <= k
@@ -31,7 +31,7 @@ eval(@finch_kernel mode=fastfinch function symsym_opt1(C, A, B)
     end
 end)
 
-eval(@finch_kernel mode=fastfinch function symsym_opt2(C, A, B)
+eval(@finch_kernel mode=:fast function symsym_opt2(C, A, B)
     C .= 0
     for j=_, k=_, i=_
         if i <= k && k <= j

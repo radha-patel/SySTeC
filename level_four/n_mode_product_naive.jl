@@ -21,21 +21,21 @@ C = Fiber!(Dense(Dense(Dense(Element(0)))), zeros((n, n, n)))
 X = Fiber!(Dense(Dense(Element(0))), rand(Int, n, n))
 # X = [1 2 3; -1 2 3; -3 -2 1]
 # TIME: ~35ms
-eval(@finch_kernel mode=fastfinch function mode2_product_naive(C, A, X)
+eval(@finch_kernel mode=:fast function mode2_product_naive(C, A, X)
     C .= 0
     for l=_, j=_, k=_, i=_ 
         C[i, j, l] += A[i, k, l] * X[k, j] 
     end
 end)
 
-eval(@finch_kernel mode=fastfinch function mode1_product_naive(C, A, X)
+eval(@finch_kernel mode=:fast function mode1_product_naive(C, A, X)
     C .= 0
     for l=_, j=_, k=_, i=_ 
         C[i, j, l] += A[k, j, l] * X[k, i] 
     end
 end)
 
-eval(@finch_kernel mode=fastfinch function mode3_product_naive(C, A, X)
+eval(@finch_kernel mode=:fast function mode3_product_naive(C, A, X)
     C .= 0
     for l=_, k=_, j=_, i=_ 
         C[i, j, l] += A[i, j, k] * X[k, l] 

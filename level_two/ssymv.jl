@@ -12,11 +12,12 @@ temp = Scalar(0)
 # y = Fiber!(Dense(Element(0.0)), zeros(n));
 # temp = Scalar(0.0)
 
-eval(@finch_kernel mode=fastfinch function ssymv_ref(y, A, x) 
+eval(@finch_kernel mode=:fast function ssymv_ref(y, A, x) 
     y .= 0
     for j = _, i = _
         y[i] += A[i, j] * x[j]
     end
+    y
 end)
 
 function ssymv_ref_helper(y, A, x) 
@@ -27,7 +28,7 @@ end
 # y = Ax (A symmetric)
 # Optimization: 1x flops, 2x memory bandwidth
 # TIME: ~15ms
-eval(@finch_kernel mode=fastfinch function ssymv_opt1(y, A, x, temp)
+eval(@finch_kernel mode=:fast function ssymv_opt1(y, A, x, temp)
     y .= 0
     for j = _
         let temp1 = x[j]
@@ -48,7 +49,7 @@ eval(@finch_kernel mode=fastfinch function ssymv_opt1(y, A, x, temp)
     y
 end)
 
-# eval(@finch_kernel mode=fastfinch function ssymv_opt2(y, A, x)
+# eval(@finch_kernel mode=:fast function ssymv_opt2(y, A, x)
 #     y .= 0
 #     for j=_, i=_
 #         let A_ij = A[i, j], x_j = x[j]
@@ -63,7 +64,7 @@ end)
 #     end
 # end)
 
-eval(@finch_kernel mode=fastfinch function ssymv_opt3(y, A, x, temp)
+eval(@finch_kernel mode=:fast function ssymv_opt3(y, A, x, temp)
     y .= 0
     for j=_
         let x_j = x[j]

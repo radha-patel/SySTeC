@@ -10,7 +10,7 @@ B = Tensor(Dense(Element(0)), rand(Int, n))
 C = Scalar(0)
 
 # ~14ms
-eval(@finch_kernel mode=fastfinch function syprd_ref(C, A, B)
+eval(@finch_kernel mode=:fast function syprd_ref(C, A, B)
     C .= 0
     for j=_, i=_
         C[] += B[i] * A[i, j] * B[j]
@@ -18,7 +18,7 @@ eval(@finch_kernel mode=fastfinch function syprd_ref(C, A, B)
 end)
 
 # ~7.2ms
-eval(@finch_kernel mode=fastfinch function syprd_gen(C, A, B)
+eval(@finch_kernel mode=:fast function syprd_gen(C, A, B)
     C .= 0
     for j=_, i=_
         let B_i = B[i], A_ij = A[i, j], B_j = B[j]
@@ -33,7 +33,7 @@ eval(@finch_kernel mode=fastfinch function syprd_gen(C, A, B)
 end)
 
 # ~7.1ms
-eval(@finch_kernel mode=fastfinch function syprd_opt1(C, A, B)
+eval(@finch_kernel mode=:fast function syprd_opt1(C, A, B)
     C .= 0
     for j=_, i=_
         let B_i = B[i], A_ij = A[i, j], B_j = B[j]
@@ -50,7 +50,7 @@ eval(@finch_kernel mode=fastfinch function syprd_opt1(C, A, B)
 end)
 
 # ~8.0ms
-eval(@finch_kernel mode=fastfinch function syprd_opt2(C, A, B)
+eval(@finch_kernel mode=:fast function syprd_opt2(C, A, B)
     C .= 0
     for j=_, i=_
         let B_i = B[i], A_ij = A[i, j], B_j = B[j]

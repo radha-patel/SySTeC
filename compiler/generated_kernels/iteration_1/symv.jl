@@ -11,7 +11,7 @@ C = Tensor(Dense(Element(0)), zeros(n))
 temp = Scalar(0)
 
 # ~16ms
-eval(@finch_kernel mode=fastfinch function symv_ref(C, A, B)
+eval(@finch_kernel mode=:fast function symv_ref(C, A, B)
     C .= 0
     for j=_, i=_
         C[i] += A[i, j] * B[j]
@@ -19,7 +19,7 @@ eval(@finch_kernel mode=fastfinch function symv_ref(C, A, B)
 end)
 
 # ~11ms
-eval(@finch_kernel mode=fastfinch function symv_gen(C, A, B)
+eval(@finch_kernel mode=:fast function symv_gen(C, A, B)
     C .= 0
     for j=_, i=_
         let A_ij = A[i, j]
@@ -34,7 +34,7 @@ eval(@finch_kernel mode=fastfinch function symv_gen(C, A, B)
 end)
 
 # ~10ms
-eval(@finch_kernel mode=fastfinch function symv_opt(C, A, B, temp)
+eval(@finch_kernel mode=:fast function symv_opt(C, A, B, temp)
     C .= 0
     for j=_
         temp .= 0

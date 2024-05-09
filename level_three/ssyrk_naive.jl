@@ -6,7 +6,7 @@ C = Fiber!(Dense(Dense(Element(0.0))), zeros(10000, 10000))
 
 # C = AA^T (A symmetric)
 # TIME: ~80s
-eval(@finch_kernel mode=fastfinch function ssyrk_naive(C, A) 
+eval(@finch_kernel mode=:fast function ssyrk_naive(C, A) 
     for k = _, j = _, i = _
         C[i, j] += A[i, k] * A[j, k]
     end

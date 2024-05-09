@@ -12,14 +12,14 @@ X = Fiber!(Dense(Element(0)), x)
 C = Scalar(0)
 D = Scalar(0)
 
-eval(@finch_kernel mode=fastfinch function syprd_ref(C, A, X)
+eval(@finch_kernel mode=:fast function syprd_ref(C, A, X)
     C .= 0
     for j=_, i=_ 
         C[] += X[i] * A[i, j] * X[j] 
     end
 end)
 
-eval(@finch_kernel mode=fastfinch function syprd_opt1(C, D, A, X)
+eval(@finch_kernel mode=:fast function syprd_opt1(C, D, A, X)
     C .= 0
     D .= 0
     for j=_ 

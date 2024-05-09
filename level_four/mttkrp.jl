@@ -32,21 +32,21 @@ n = 100
     C_jk = Scalar(0)
     C_jl = Scalar(0)
 
-    eval(@finch_kernel mode=fastfinch function mttkrp_ref(C, A, B)
+    eval(@finch_kernel mode=:fast function mttkrp_ref(C, A, B)
         C .= 0
         for l=_, j=_, k=_, i=_
             C[i, j] += A[i, k, l] * B[l, j] * B[k, j]
         end
     end)
 
-    eval(@finch_kernel mode=fastfinch function mttkrp_ref(C, A_diag, B)
+    eval(@finch_kernel mode=:fast function mttkrp_ref(C, A_diag, B)
         C .= 0
         for l=_, j=_, k=_, i=_
             C[i, j] += A_diag[i, k, l] * B[l, j] * B[k, j]
         end
     end)
 
-    # eval(@finch_kernel mode=fastfinch function _mttkrp_ref(_C, A, B)
+    # eval(@finch_kernel mode=:fast function _mttkrp_ref(_C, A, B)
     #     _C .= 0
     #     for l=_, j=_, k=_, i=_
     #         _C[i, k, l, j] += A[i, k, l] * B[l, j] * B[k, j]
@@ -54,7 +54,7 @@ n = 100
     # end)
 
     # assumes diagonals have been zeroed (~3.8x faster than ref) - A is Dense(Sparse(Sparse))
-    eval(@finch_kernel mode=fastfinch function mttkrp_opt1(C, A_nondiag, B)
+    eval(@finch_kernel mode=:fast function mttkrp_opt1(C, A_nondiag, B)
         C .= 0
         for l=_, k=_, i=_, j=_
             if i < k && k < l
@@ -68,7 +68,7 @@ n = 100
     end)
 
     # assumes diagonals have been zeroed (~2.6x faster than ref)
-    # eval(@finch_kernel mode=fastfinch function mttkrp_opt1_1(C, C_jk, C_jl, A, B)
+    # eval(@finch_kernel mode=:fast function mttkrp_opt1_1(C, C_jk, C_jl, A, B)
     #     C .= 0
     #     for l=_, k=_, j=_
     #         C_jk .= 0
@@ -88,7 +88,7 @@ n = 100
     # end)
 
     # assumes diagonals have been zeroed (~2.2x faster than ref)
-    # eval(@finch_kernel mode=fastfinch function mttkrp_opt1_2(C, C_jk, C_jl, A, B)
+    # eval(@finch_kernel mode=:fast function mttkrp_opt1_2(C, C_jk, C_jl, A, B)
     #     C .= 0
     #     for j=_, l=_, k=_
     #         C_jk .= 0
@@ -108,7 +108,7 @@ n = 100
     # end)
 
     # assumes diagonals have been zeroed (~2.8x faster than ref)
-    # eval(@finch_kernel mode=fastfinch function mttkrp_opt1_3(C, C_jk, C_jl, A, B)
+    # eval(@finch_kernel mode=:fast function mttkrp_opt1_3(C, C_jk, C_jl, A, B)
     #     C .= 0
     #     for l=_, j=_, k=_
     #         C_jk .= 0
@@ -127,7 +127,7 @@ n = 100
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mttkrp_opt2(_C, _T, A, B)
+    # eval(@finch_kernel mode=:fast function mttkrp_opt2(_C, _T, A, B)
     #     _C .= 0
     #     # _T .= 0
     #     for j=_, l=_, k=_, i=_
@@ -161,7 +161,7 @@ n = 100
     # end)
 
     # println("evaluating opt3")
-    # eval(@finch_kernel mode=fastfinch function mttkrp_opt3(C, A, B)
+    # eval(@finch_kernel mode=:fast function mttkrp_opt3(C, A, B)
     #     C .= 0
     #     for l=_, k=_, i=_, j=_
     #         let A_ikl = A[i, k, l], B_kj = B[j, k], B_lj = B[j, l], B_ij = B[j, i]
@@ -193,7 +193,7 @@ n = 100
 
     # Only evaluates diagonals
     println("evaluating opt3_1")
-    eval(@finch_kernel mode=fastfinch function mttkrp_opt3_1(C, A_diag, B)
+    eval(@finch_kernel mode=:fast function mttkrp_opt3_1(C, A_diag, B)
         C .= 0
         for l=_, k=_, i=_, j=_
             let A_ikl = A_diag[i, k, l], B_kj = B[j, k], B_lj = B[j, l], B_ij = B[j, i]
@@ -219,7 +219,7 @@ n = 100
     println("done evaluating opt3")
 
     # println("evaluating opt4")
-    # eval(@finch_kernel mode=fastfinch function mttkrp_opt4(C, A, B)
+    # eval(@finch_kernel mode=:fast function mttkrp_opt4(C, A, B)
     #     C .= 0
     #     for l=_, k=_, i=_
     #         let A_ikl = A[i, k, l]

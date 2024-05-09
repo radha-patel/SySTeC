@@ -14,7 +14,7 @@ C_T = Tensor(Dense(Dense(Element(0))), zeros(n, n))
 temp = Scalar(0)
 
 # ~100ms
-eval(@finch_kernel mode=fastfinch function symm_ref(C, A, B)
+eval(@finch_kernel mode=:fast function symm_ref(C, A, B)
     C .= 0
     for j=_, k=_, i=_
         C[i, j] += A[i, k] * B[k, j]
@@ -22,7 +22,7 @@ eval(@finch_kernel mode=fastfinch function symm_ref(C, A, B)
 end)
 
 # ~90ms
-eval(@finch_kernel mode=fastfinch function symm_gen(C, A, B)
+eval(@finch_kernel mode=:fast function symm_gen(C, A, B)
     C .= 0
     for j=_, k=_, i=_
         let A_ik = A[i, k]
@@ -37,7 +37,7 @@ eval(@finch_kernel mode=fastfinch function symm_gen(C, A, B)
 end)
 
 # ~70ms
-eval(@finch_kernel mode=fastfinch function symm_opt1(C, A, B, temp)
+eval(@finch_kernel mode=:fast function symm_opt1(C, A, B, temp)
     C .= 0
     for j=_, k=_
         temp .= 0
@@ -56,7 +56,7 @@ eval(@finch_kernel mode=fastfinch function symm_opt1(C, A, B, temp)
 end)
 
 # ~40ms
-eval(@finch_kernel mode=fastfinch function symm_opt2(C_T, A, B_T)
+eval(@finch_kernel mode=:fast function symm_opt2(C_T, A, B_T)
     C_T .= 0
     for k=_, i=_, j=_
         let A_ik = A[i, k]

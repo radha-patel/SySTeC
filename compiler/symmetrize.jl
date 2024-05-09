@@ -491,12 +491,12 @@ function exploit_output_replication(ex)
     replicate = Dict()
     fully_replicable = false
 
-    ex = Rewrite(Postwalk(@rule ex sieve(~cond::is_base, ~body) => begin
+    ex = Rewrite(Postwalk(@rule sieve(~cond::is_base, ~body) => begin
         body, replicate, fully_replicable = exploit_output_replication_base(body)
         return sieve(cond, body)
     end))(ex)
 
-    Rewrite(Postwalk(@rule ex sieve(~cond::((c) -> !is_base(c)), ~body) => begin
+    Rewrite(Postwalk(@rule sieve(~cond::((c) -> !is_base(c)), ~body) => begin
         body, replicate = exploit_output_replication_edge(body, fully_replicable, replicate)
         return sieve(cond, body)
     end))(ex)
@@ -918,9 +918,9 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
     # grouped = false
     ex = triangularize(ex, permutable_idxs, diagonals)
     if !grouped 
-        ex_2 = consolidate_conditions(ex)
+        # ex_2 = consolidate_conditions(ex)
         # TODO: maybe there is a better metric to determine which expression to keep?
-        ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
+        # ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
         ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
         ex = insert_loops(ex, permutable_idxs, loop_order)
         display(ex) 

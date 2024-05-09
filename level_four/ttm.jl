@@ -22,14 +22,14 @@ n = 100
     temp2 = Scalar(0)
     temp4 = Tensor(Dense(Element(0)), rand(Int, n))
 
-    # eval(@finch_kernel mode=fastfinch function mode2_product_ref(C, A, X)
+    # eval(@finch_kernel mode=:fast function mode2_product_ref(C, A, X)
     #     C .= 0
     #     for l=_, j=_, k=_, i=_ 
     #         C[i, j, l] += A[i, k, l] * X[k, j] 
     #     end
     # end)
 
-    eval(@finch_kernel mode=fastfinch function mode1_product_ref(C, A, X)
+    eval(@finch_kernel mode=:fast function mode1_product_ref(C, A, X)
         C .= 0
         for l=_, j=_, k=_, i=_ 
             # C[i, j, k, l] += A[k, j, l] * X[k, i] 
@@ -37,14 +37,14 @@ n = 100
         end
     end)
 
-    # eval(@finch_kernel mode=fastfinch function mode3_product_ref(C, A, X)
+    # eval(@finch_kernel mode=:fast function mode3_product_ref(C, A, X)
     #     C .= 0
     #     for l=_, k=_, j=_, i=_ 
     #         C[i, j, l] += A[i, j, k] * X[k, l] 
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode2_product_opt1(C, A, X, temp2) 
+    # eval(@finch_kernel mode=:fast function mode2_product_opt1(C, A, X, temp2) 
         # C .= 0
         # for l=_, j=_, i=_
         #     temp2 .= 0
@@ -64,7 +64,7 @@ n = 100
         # end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode1_product_opt1(C, A, X, temp2) 
+    # eval(@finch_kernel mode=:fast function mode1_product_opt1(C, A, X, temp2) 
     #     C .= 0
     #     for l=_, j=_, i=_
     #         temp2 .= 0
@@ -84,7 +84,7 @@ n = 100
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode2_product_opt2(C, A, X, temp2, temp4) 
+    # eval(@finch_kernel mode=:fast function mode2_product_opt2(C, A, X, temp2, temp4) 
     #     C .= 0
     #     for j=_, i=_
     #         temp4 .= 0
@@ -121,7 +121,7 @@ n = 100
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode1_product_opt2(C, A, X, temp2, temp4) 
+    # eval(@finch_kernel mode=:fast function mode1_product_opt2(C, A, X, temp2, temp4) 
     #     C .= 0
     #     for i=_, j=_
     #         temp4 .= 0
@@ -158,7 +158,7 @@ n = 100
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode2_product_opt3(C, A, X, temp2) 
+    # eval(@finch_kernel mode=:fast function mode2_product_opt3(C, A, X, temp2) 
     #     C .= 0
     #     for l=_, j=_, i=_
     #         temp2 .= 0
@@ -180,7 +180,7 @@ n = 100
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode1_product_opt3(C, A, X, temp2) 
+    # eval(@finch_kernel mode=:fast function mode1_product_opt3(C, A, X, temp2) 
     #     C .= 0
     #     for l=_, j=_, i=_
     #         temp2 .= 0
@@ -202,7 +202,7 @@ n = 100
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode2_product_opt4(C, A, X, temp2) 
+    # eval(@finch_kernel mode=:fast function mode2_product_opt4(C, A, X, temp2) 
     #     C .= 0
     #     for j=_, l=_, i=_
     #         if i <= l
@@ -225,7 +225,7 @@ n = 100
     #     end
     # end)
 
-    # eval(@finch_kernel mode=fastfinch function mode1_product_opt4(C, A, X, temp2) 
+    # eval(@finch_kernel mode=:fast function mode1_product_opt4(C, A, X, temp2) 
     #     C .= 0
     #     for j=_, l=_, i=_
     #         if i <= l
@@ -249,7 +249,7 @@ n = 100
     # end)
 
     # will need to do a permute afterwards to switch i and j in C[j, i, l]
-    # eval(@finch_kernel mode=fastfinch function mode2_product_opt5(C, _C, A, X, X_T, temp2) 
+    # eval(@finch_kernel mode=:fast function mode2_product_opt5(C, _C, A, X, X_T, temp2) 
     #     C .= 0
     #     _C .= 0
         # for l=_, i=_
@@ -276,7 +276,7 @@ n = 100
     # end)
 
 
-    # eval(@finch_kernel mode=fastfinch function mode1_product_opt5(C, A, X, X_T) 
+    # eval(@finch_kernel mode=:fast function mode1_product_opt5(C, A, X, X_T) 
     #     C .= 0
     #     for l=_, i=_
     #         if i <= l
@@ -302,7 +302,7 @@ n = 100
     # end)
 
     println("evaluating opt6")
-    eval(@finch_kernel mode=fastfinch function mode1_product_opt6(C, A, X) 
+    eval(@finch_kernel mode=:fast function mode1_product_opt6(C, A, X) 
         C .= 0
         for l=_, k=_, j=_, i=_
             let A_jkl = A[j, k, l]
@@ -321,7 +321,7 @@ n = 100
     println("done evaluating opt6")
 
     println("evaluating opt7")
-    eval(@finch_kernel mode=fastfinch function mode1_product_opt7(C, A, X) 
+    eval(@finch_kernel mode=:fast function mode1_product_opt7(C, A, X) 
         C .= 0
         for l=_, k=_, j=_, i=_
             let A_jkl = A[j, k, l], j_leq_k = (j <= k), k_leq_l = (k <= l)
@@ -340,7 +340,7 @@ n = 100
     println("done evaluating opt7")
 
     println("evaluating opt8")
-    eval(@finch_kernel mode=fastfinch function mode1_product_opt8(C, A, X) 
+    eval(@finch_kernel mode=:fast function mode1_product_opt8(C, A, X) 
         C .= 0
         for l=_, k=_, j=_, i=_
             let A_jkl = A[j, k, l]

@@ -11,7 +11,7 @@ C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, n, n)))
 X = Fiber!(Dense(Dense(Element(0.0))), rand(n, n))
 temp2 = Scalar(0.0)
 # TIME: ~12ms
-eval(@finch_kernel mode=fastfinch function n_mode_product(C, A, X, temp2) 
+eval(@finch_kernel mode=:fast function n_mode_product(C, A, X, temp2) 
     for l=_, j=_, i=_
         temp2 .= 0
         let temp1 = X[i, j]
@@ -32,7 +32,7 @@ end)
 println("compiled n_mode_product")
 
 _C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, n, n)))
-# eval(@finch_kernel mode=fastfinch function n_mode_product2(C, A, X, temp2) 
+# eval(@finch_kernel mode=:fast function n_mode_product2(C, A, X, temp2) 
 #     for l=_, j=_, i=_
 #         temp2 .= 0
 #         let temp1 = X[i, j]
@@ -68,7 +68,7 @@ _C = Fiber!(Dense(Dense(Dense(Element(0.0)))), zeros((n, n, n)))
 # C[l, j, i] = A[l, k, i] * X[k, j]
 # C[i, j, l] = C[l, j, i]
 temp4 = Fiber!(Dense(Element(0.0)), zeros(n))
-eval(@finch_kernel mode=fastfinch function n_mode_product3(C, A, X, temp2, temp4) 
+eval(@finch_kernel mode=:fast function n_mode_product3(C, A, X, temp2, temp4) 
     for j=_, i=_
         temp4 .= 0
         for l=_

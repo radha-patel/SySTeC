@@ -13,7 +13,7 @@ B = Fiber!(Dense(Dense(Element(0))), rand(Int, n, n))
 C = Fiber!(Dense(Dense(Element(0))), zeros(n, n)) 
 T = Fiber!(Dense(Dense(Element(0))), zeros(n, n))    
 
-eval(@finch_kernel mode=fastfinch function ssyrkm_ref1(C, A, B, T)
+eval(@finch_kernel mode=:fast function ssyrkm_ref1(C, A, B, T)
     T .= 0
     for j = _, k = _, i = _
         T[i, j] += A[i, k] * A[k, j]
@@ -24,14 +24,14 @@ eval(@finch_kernel mode=fastfinch function ssyrkm_ref1(C, A, B, T)
     end
 end)
 
-eval(@finch_kernel mode=fastfinch function ssyrkm_ref2(C, A, B)
+eval(@finch_kernel mode=:fast function ssyrkm_ref2(C, A, B)
     C .= 0
     for j = _, k = _, l = _, i = _
         C[i, j] += A[i, k] * A[k, l] * B[l, j]
     end
 end)
 
-eval(@finch_kernel mode=fastfinch function ssyrkm_opt1(C, A, B)
+eval(@finch_kernel mode=:fast function ssyrkm_opt1(C, A, B)
     C .= 0
     for j = _, k = _, l = _, i = _
         let temp = A[i, k] * A[k, l]
