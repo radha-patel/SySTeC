@@ -166,7 +166,12 @@ function normalize(ex, issymmetric)
         # Sort indices of symmetric matrices in canonical order (alphabetical)
         (@rule access(~tn::issymmetric, ~mode, ~idxs...) => access(tn, mode, order_canonically(idxs)...)),
         # Sort operands in canonical order
-        (@rule call(~op::is_commutative, ~tns...) => call(op, sort(tns, by = tn->hash(tn))...))
+        (@rule call(~op::is_commutative, ~tns...) => begin 
+            if isa(tns[1].val, Number)
+                return nothing
+            end
+            call(op, sort(tns, by = tn->hash(tn))...)
+        end)
     ])))
     _normalize(ex)
 end
@@ -218,8 +223,8 @@ the product of the input matrices for some set index values.
 function updates_count(body)
     count = 0
     Postwalk(@rule assign(~lhs, +, ~rhs) => begin
-        if @capture rhs call(*, 2, ~rhs_2)
-            count += 2
+        if @capture rhs call(*, ~n, ~rhs_2)
+            count += n.val
         else
             count += 1
         end
@@ -265,24 +270,44 @@ end
 
 
 """
-    decouple_assignments(ex, subsymmetry)
+    decouple_grouped_updates(ex, subsymmetry)
 
 Upgroup groups of two assignments and rewrite one with a pair of equivalent indices
 swapped in all nonsymmetric tensors. Return list of resulting assignment expressions.
 """
 function decouple_grouped_updates(ex, subsymmetry, issymmetric)
     assignments = []
+    # display("BEFORE")
+    # display(ex)
+    # display(subsymmetry)
     Postwalk(@rule assign(~lhs, +, ~rhs) => begin
-        if @capture rhs call(*, 2, ~rhs_2)
-            idx_1, idx_2 = subsymmetry[1] # TODO: what if we have a more complicated subsymmetry?
-            lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
-            rhs_3 = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
-            push!(assignments, assign(lhs, +, rhs_2))
-            push!(assignments, assign(lhs_swapped, +, normalize(rhs_3, issymmetric)))
+        if @capture rhs call(*, ~n, ~rhs_2)
+            decoupled = false
+            for sym in subsymmetry
+                if n.val % length(sym) == 0
+                    factor = Int(n.val / length(sym))
+                    idx_2 = sym[end]
+                    for idx_1 in sym[1:end-1]
+                        lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
+                        rhs_swapped = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
+                        new_rhs = (factor == 1 ? rhs_swapped : call(*, factor, rhs_swapped))
+                        push!(assignments, assign(lhs_swapped, +, normalize(new_rhs, issymmetric)))
+                    end
+                    rhs_2 = (factor == 1 ? rhs_2 : call(*, factor, rhs_2))
+                    push!(assignments, assign(lhs, +, normalize(rhs_2, issymmetric)))
+                    decoupled = true
+                    break
+                end
+            end
+            if !decoupled
+                push!(assignments, assign(lhs, +, rhs))
+            end
         else
             push!(assignments, assign(lhs, +, rhs))
         end
     end)(ex)
+    # display("AFTER")
+    # display(assignments)
     return assignments
 end
 
@@ -297,7 +322,7 @@ expression as a result of performing this transform.
 """
 function group_sieves(ex, issymmetric)
     grouped = false
-    ex = Rewrite(Postwalk(@rule block(~s1..., sieve(~c1, ~b1), ~s2..., sieve(~c2, ~b2), ~s3...) => begin
+    ex = Fixpoint(Rewrite(Postwalk(@rule block(~s1..., sieve(~c1, ~b1), ~s2..., sieve(~c2, ~b2), ~s3...) => begin
         if updates_count(b1) != updates_count(b2)
             return nothing
         end
@@ -313,7 +338,7 @@ function group_sieves(ex, issymmetric)
             return block(s1..., sieve(call(or, c1, c2), block(b1_s...)), s2..., s3...)
         end
         # TODO: combine conditions here -> 1. maybe just throw in or and combine in another transform, or 2. "merge" here
-    end))(ex)
+    end)))(ex)
     return grouped, ex
 end
 
