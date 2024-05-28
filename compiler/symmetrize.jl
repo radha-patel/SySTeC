@@ -324,8 +324,16 @@ end
 Return rewritten ex with equivalent assignments in a block grouped together.
 """
 function group_assignments(ex)
-    Fixpoint(Rewrite(Postwalk(@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
-                        block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...))))(ex)
+    Fixpoint(Rewrite(Postwalk(Chain([
+        (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
+                        block(s1..., assign(lhs, +, call(*, 2, rhs)), s2..., s3...)),
+        (@rule block(~s1..., assign(~lhs, +, call(*, ~n, ~rhs)), ~s2..., assign(~lhs, +, ~rhs), ~s3...) =>
+                        block(s1..., assign(lhs, +, call(*, n.val + 1, rhs)), s2..., s3...)),
+        (@rule block(~s1..., assign(~lhs, +, ~rhs), ~s2..., assign(~lhs, +, call(*, ~n, ~rhs)), ~s3...) =>
+                        block(s1..., assign(lhs, +, call(*, n.val + 1, rhs)), s2..., s3...)),
+        (@rule block(~s1..., assign(~lhs, +, call(*, ~n_1, ~rhs)), ~s2..., assign(~lhs, +, call(*, ~n_2, ~rhs)), ~s3...) =>
+                        block(s1..., assign(lhs, +, call(*, n_1.val + n_2.val, rhs)), s2..., s3...)),
+    ]))))(ex)
 end
 
 
