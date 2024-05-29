@@ -92,8 +92,8 @@ function get_subsymmetry(cond)
     end
     for cond in conds
         if @capture cond call(==, ~idx_1, ~idx_2)
-            if length(subsymmetry) > 0 && idx_1 in subsymmetry[1]
-                push!(subsymmetry[1], idx_2)
+            if length(subsymmetry) > 0 && idx_1 in subsymmetry[end]
+                push!(subsymmetry[end], idx_2)
             else
                 push!(subsymmetry, [idx_1, idx_2])
             end
@@ -223,7 +223,8 @@ the product of the input matrices for some set index values.
 function updates_count(body)
     count = 0
     Postwalk(@rule assign(~lhs, +, ~rhs) => begin
-        if @capture rhs call(*, ~n, ~rhs_2)
+        @capture rhs call(*, ~n, ~rhs_2)
+        if (@capture rhs call(*, ~n, ~rhs_2)) && isa(n.val, Number)
             count += n.val
         else
             count += 1
@@ -275,17 +276,18 @@ end
 Upgroup groups of two assignments and rewrite one with a pair of equivalent indices
 swapped in all nonsymmetric tensors. Return list of resulting assignment expressions.
 """
-function decouple_grouped_updates(ex, subsymmetry, issymmetric)
+function decouple_grouped_updates(ex, subsymmetry, issymmetric, permutable_idxs)
     assignments = []
-    # display("BEFORE")
-    # display(ex)
-    # display(subsymmetry)
+    factor = Int(updates_count(ex) / length(permutable_idxs))
     Postwalk(@rule assign(~lhs, +, ~rhs) => begin
-        if @capture rhs call(*, ~n, ~rhs_2)
+        if (@capture rhs call(*, ~n, ~rhs_2)) && isa(n.val, Number)
             decoupled = false
             for sym in subsymmetry
-                if n.val % length(sym) == 0
-                    factor = Int(n.val / length(sym))
+                @capture lhs access(~tn, ~idxs...)
+                if !(sym[end] in idxs)
+                    continue
+                end
+                if n.val % factor == 0 && n.val / factor > 1
                     idx_2 = sym[end]
                     for idx_1 in sym[1:end-1]
                         lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
@@ -306,8 +308,6 @@ function decouple_grouped_updates(ex, subsymmetry, issymmetric)
             push!(assignments, assign(lhs, +, rhs))
         end
     end)(ex)
-    # display("AFTER")
-    # display(assignments)
     return assignments
 end
 
@@ -320,7 +320,7 @@ Identifies sieves that perform the same updates and groups them together. Return
 a boolean representing whether any equivalent sieves were found and the resulting
 expression as a result of performing this transform. 
 """
-function group_sieves(ex, issymmetric)
+function group_sieves(ex, issymmetric, permutable_idxs)
     grouped = false
     ex = Fixpoint(Rewrite(Postwalk(@rule block(~s1..., sieve(~c1, ~b1), ~s2..., sieve(~c2, ~b2), ~s3...) => begin
         if updates_count(b1) != updates_count(b2)
@@ -330,12 +330,23 @@ function group_sieves(ex, issymmetric)
         b1_subsymmetry = get_subsymmetry(c1)
         b2_subsymmetry = get_subsymmetry(c2)
 
-        b1_s = decouple_grouped_updates(b1, b1_subsymmetry, issymmetric)
-        b2_s = decouple_grouped_updates(b2, b2_subsymmetry, issymmetric)
+        b1_s = decouple_grouped_updates(b1, b1_subsymmetry, issymmetric, permutable_idxs)
+        b2_s = decouple_grouped_updates(b2, b2_subsymmetry, issymmetric, permutable_idxs)
 
         if are_updates_identical(b1_s, b2_s)
             grouped = true
-            return block(s1..., sieve(call(or, c1, c2), block(b1_s...)), s2..., s3...)
+            or_conds = []
+            if @capture c1 call(or, ~cond...)
+                push!(or_conds, cond...)
+            else
+                push!(or_conds, c1)
+            end
+            if @capture c2 call(or, ~cond...)
+                push!(or_conds, cond...)
+            else
+                push!(or_conds, c2)
+            end
+            return block(s1..., sieve(call(or, or_conds...), block(b1_s...)), s2..., s3...)
         end
         # TODO: combine conditions here -> 1. maybe just throw in or and combine in another transform, or 2. "merge" here
     end)))(ex)
@@ -606,12 +617,14 @@ function consolidate_reads(ex)
                 ex = Postwalk(@rule node => var)(ex)
                 if is_eq_op(op) 
                     negation = call(literal(!=), idx_1, idx_2)
-                    ex = Postwalk(@rule negation => call(literal(!=), var))(ex)
+                    temp = Postwalk(@rule negation => call(literal(!), var))(ex)
+                    if temp != nothing
+                        ex = temp
+                    end
                 end
                 ex = define(var, call(op, idx_1, idx_2), ex)
             end
         end
-        # TODO: how to best consolidate the other nodes?
         ex
     end))(ex)
 end
@@ -919,6 +932,78 @@ function transpose_operands(ex, issymmetric, loop_order)
     return ex, transposed
 end
 
+primes = [2, 3, 5, 7, 11, 13, 17]
+function set_lookup_idxs(table, cond, factor)
+    if @capture cond call(or, ~conds...) 
+        for cond in conds 
+            val = 1
+            if @capture cond call(and, ~equalities...)
+                for i in 1:length(equalities)
+                    if !(@capture equalities[i] call(!=, ~idx_1, ~idx_2))
+                        val *= primes[i]
+                    end
+                end
+            end
+            table[val] = factor
+        end
+    end
+end
+
+function insert_lookup(ex, conditions)
+    @capture ex sieve(~triangle, ~ex)
+    lookup_block = Dict()
+    lookup_table = Dict()
+    blocks = []
+    result = []
+    ex = Postwalk(@rule sieve(~cond, ~block) => begin
+        assignments = []
+        same_factor = true
+        factor = nothing
+        Postwalk(@rule assign(~lhs, +, ~rhs) => begin
+            if @capture rhs call(*, ~n, ~rhs)
+                if factor == nothing
+                    factor = n.val
+                elseif factor != n.val
+                    same_factor = false
+                end
+            end
+            push!(assignments, assign(lhs, +, call(*, :factor, rhs)))
+        end)(block)
+        if same_factor && factor != nothing
+            sort!(assignments, by = assignment -> hash(assignment))
+            lookup_block[hash(assignments)] = assignments
+            table = zeros(210)
+            if haskey(lookup_table, hash(assignments))
+                table = lookup_table[hash(assignments)]
+            else
+                lookup_table[hash(assignments)] = table
+            end
+            set_lookup_idxs(table, cond, factor)
+        else
+            push!(blocks, sieve(cond, block))
+        end
+    end)(ex)
+
+    for (hsh, assignments) in lookup_block
+        ctx = JuliaContext()
+        factor = freshen(ctx, :factor)
+        new_block = define(factor, access(:lookup, reader, index(:idx)), block(assignments...))
+        idx = freshen(ctx, :idx)
+
+        @capture conditions call(and, ~conditions...)
+        val = call(*, primes[1], conditions[1])
+        for i in 2:length(conditions)
+            to_add = call(*, primes[i], conditions[i])
+            val = call(+, val, to_add)
+        end
+
+        new_block = define(idx, val, new_block)
+        push!(blocks, new_block)
+    end
+
+    return collect(values(lookup_table))[1], sieve(triangle, block(blocks...))
+end
+
 """
     symmetrize2(ex, symmetric_tns)
 
@@ -927,7 +1012,7 @@ end
 # TODO: transpose some tensors?
 # TODO: option to generate code to initialize tensors 
 # TODO: stress testing - for what sizes/complexities of tensors/kernels does this work?
-function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
+function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_table=false)
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
 
@@ -947,7 +1032,7 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
     ex = group_assignments(ex)
     ex = exploit_output_replication(ex)
     # TODO: grouping takes a LONG time - constrain when we actually do this?
-    grouped, ex = group_sieves(ex, issymmetric)
+    grouped, ex = group_sieves(ex, issymmetric, permutable_idxs)
     # grouped = false
     ex = triangularize(ex, permutable_idxs, diagonals)
     if !grouped 
@@ -959,6 +1044,10 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true)
         display(ex) 
     else
         ex_base, ex_edge = separate_loop_nests(ex)
+        if lookup_table
+            lookup_table, ex_edge = insert_lookup(ex_edge, conditions[end])
+            println(lookup_table)
+        end
         ex_base = consolidate_reads(ex_base)
         ex_edge = consolidate_reads(ex_edge)
         ex_edge = insert_identity(ex_edge)
