@@ -953,7 +953,7 @@ function insert_lookup(ex, conditions)
     @capture ex sieve(~triangle, ~ex)
     lookup_block = Dict()
     lookup_table = Dict()
-    blocks = []
+    blocks = Dict()
     result = []
     ex = Postwalk(@rule sieve(~cond, ~block) => begin
         assignments = []
@@ -964,6 +964,12 @@ function insert_lookup(ex, conditions)
                 if factor == nothing
                     factor = n.val
                 elseif factor != n.val
+                    same_factor = false
+                end
+            else 
+                if factor == nothing
+                    factor = 1
+                elseif factor != 1 
                     same_factor = false
                 end
             end
@@ -979,29 +985,39 @@ function insert_lookup(ex, conditions)
                 lookup_table[hash(assignments)] = table
             end
             set_lookup_idxs(table, cond, factor)
+        end
+        if haskey(blocks, hash(assignments))
+            push!(blocks[hash(assignments)], sieve(cond, block))
         else
-            push!(blocks, sieve(cond, block))
+            blocks[hash(assignments)] = [sieve(cond, block)]
         end
     end)(ex)
 
+    all_blocks = []
+    lookup_tables = []
     for (hsh, assignments) in lookup_block
-        ctx = JuliaContext()
-        factor = freshen(ctx, :factor)
-        new_block = define(factor, access(:lookup, reader, index(:idx)), block(assignments...))
-        idx = freshen(ctx, :idx)
+        if length(blocks[hsh]) > 1
+            ctx = JuliaContext()
+            factor = freshen(ctx, :factor)
+            new_block = define(factor, access(:lookup, reader, index(:idx)), block(assignments...))
+            idx = freshen(ctx, :idx)
 
-        @capture conditions call(and, ~conditions...)
-        val = call(*, primes[1], conditions[1])
-        for i in 2:length(conditions)
-            to_add = call(*, primes[i], conditions[i])
-            val = call(+, val, to_add)
+            @capture conditions call(and, ~conditions...)
+            val = call(*, primes[1], conditions[1])
+            for i in 2:length(conditions)
+                to_add = call(*, primes[i], conditions[i])
+                val = call(+, val, to_add)
+            end
+
+            new_block = define(idx, val, new_block)
+            push!(all_blocks, new_block)
+            push!(lookup_tables, lookup_table[hsh])
+        else
+            push!(all_blocks, blocks[hsh][1])
         end
-
-        new_block = define(idx, val, new_block)
-        push!(blocks, new_block)
     end
 
-    return collect(values(lookup_table))[1], sieve(triangle, block(blocks...))
+    return lookup_tables, sieve(triangle, block(all_blocks...))
 end
 
 """
