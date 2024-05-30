@@ -197,6 +197,30 @@ function add_updates(ex, conds, permutable_idxs, issymmetric)
 end
 
 
+function get_updates(ex, permutable_idxs, issymmetric)
+    perms = get_permutations(permutable_idxs, [])
+    updates = permute_indices(ex, permutable_idxs, perms)
+    normalized_updates = normalize(updates, issymmetric)
+    return normalized_updates
+end
+
+
+function get_diag_assignment(ex, issymmetric, loop_order)
+    ex = Rewrite(Postwalk(Chain([
+        (@rule access(~tn::((t) -> issymmetric(t)), ~mode, ~idxs...) => begin
+            return access(:diag, mode, loop_order[end])
+        end),
+        (@rule access(~tn::((t) -> !issymmetric(t)), ~mode, ~idxs...) => begin
+            for i in 1:length(idxs)
+                if idxs[i] == loop_order[1]
+                    idxs[i] = loop_order[end]
+                end 
+            end
+        end)
+    ])))(ex)
+end
+
+
 # TODO: may need an additional layer of nesting here
 """
     get_possible_swaps(subsymmetry)
@@ -797,6 +821,13 @@ function insert_loops(ex, permutable_idxs, loop_order = [])
 end
 
 
+function wrap_canonical_fill_mode(base, diag, loop_order)
+    inner_loop = loop(loop_order[1], virtual(Dimensionless()), base)
+    outer_loop = loop(loop_order[2], virtual(Dimensionless()), block(inner_loop, diag))
+    return outer_loop
+end
+
+
 """
     is_comparison(op)
 
@@ -1043,6 +1074,17 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
     permutable_idxs = collect(Set(Iterators.flatten(permutable_idxs)))
 
+    # Clear noncanonical values in symmetric matrix
+    if length(loop_order) == 2 && length(permutable_idxs) == 2
+        base = get_updates(ex, permutable_idxs, issymmetric)
+        base = group_assignments(base)
+        base = consolidate_reads(base)
+        diag = get_diag_assignment(ex, issymmetric, loop_order)
+        ex = wrap_canonical_fill_mode(base, diag, loop_order)
+        display(ex)
+        return
+    end
+
     conditions = get_conditions(permutable_idxs, diagonals)
     ex = add_updates(ex, conditions, permutable_idxs, issymmetric)
     ex = group_assignments(ex)
@@ -1050,6 +1092,9 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
     # TODO: grouping takes a LONG time - constrain when we actually do this?
     grouped, ex = group_sieves(ex, issymmetric, permutable_idxs)
     # grouped = false
+    # if length(loop_order) > 3
+    #     grouped, ex = group_sieves(ex, issymmetric, permutable_idxs)
+    # end
     ex = triangularize(ex, permutable_idxs, diagonals)
     if !grouped 
         # ex_2 = consolidate_conditions(ex)
@@ -1057,7 +1102,6 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
         # ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
         ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
         ex = insert_loops(ex, permutable_idxs, loop_order)
-        display(ex) 
     else
         ex_base, ex_edge = separate_loop_nests(ex)
         if lookup_table

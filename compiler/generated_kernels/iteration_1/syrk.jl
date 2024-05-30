@@ -1,7 +1,7 @@
 using Finch
 using BenchmarkTools
 
-n = 1000
+n = 10
 triA = fsprand(Int, n, n, 0.1)
 symA = [triA[sort([i, j])...] for i = 1:n, j = 1:n]
 nondiagA = zeros(Int, n, n)
@@ -21,8 +21,8 @@ A_T = Tensor(Dense(SparseList(Element(0))), transpose(symA))
 A_dense = Tensor(Dense(Dense(Element(0))), symA)
 A_diag = Tensor(Dense(SparseList(Element(0))), diagA)
 A_nondiag = Tensor(Dense(SparseList(Element(0))), nondiagA)
-C = Tensor(Dense(Dense(Element(0))), zeros(Int, n, n))
-ref = Tensor(Dense(Dense(Element(0))), zeros(Int, n, n))
+C = Tensor(SparseHash{2}(Element(0)), zeros(Int, n, n))
+ref = Tensor(SparseHash{2}(Element(0)), zeros(Int, n, n))
 temp = Scalar(0)
 
 # ~12ms
