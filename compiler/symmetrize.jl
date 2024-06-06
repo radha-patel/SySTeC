@@ -1051,6 +1051,46 @@ function insert_lookup(ex, conditions)
     return lookup_tables, sieve(triangle, block(all_blocks...))
 end
 
+
+function workspace_transform(ex)
+    loop_idxs = []
+    all_temps = Dict()
+    ex = Rewrite(Postwalk(@rule loop(~idx, ~dim, ~body) => begin
+        push!(loop_idxs, idx)
+        temps = Dict()
+        body = Rewrite(Postwalk(@rule assign(~lhs, +, ~rhs) => begin
+            if @capture lhs access(~tn, ~mode, ~idxs...) 
+                if isempty(intersect(Set(loop_idxs), Set(idxs)))
+                    var = :temp
+                    temps[var] = lhs
+                    lhs = var
+                end
+            end
+            assign(lhs, +, rhs)
+        end))(body)
+        for (var, val) in pairs(temps)
+            body = define(var, val, body)
+            all_temps[var] = val
+        end
+        loop(idx, dim, body)
+    end))(ex)
+
+    loop_idxs = []
+    ex = Rewrite(Prewalk(@rule loop(~idx, ~dim, ~body) => begin 
+        push!(loop_idxs, idx)
+        for (var, val) in pairs(all_temps)
+            @capture val access(~tn, ~mode, ~idxs...) 
+            if all(x -> x in loop_idxs, idxs)
+                if @capture body block(~s...)
+                    body = block(s..., assign(val, +, var))
+                end
+            end
+        end
+        loop(idx, dim, body)
+    end))(ex)
+    ex
+end
+
 """
     symmetrize2(ex, symmetric_tns)
 
@@ -1081,6 +1121,7 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
         base = consolidate_reads(base)
         diag = get_diag_assignment(ex, issymmetric, loop_order)
         ex = wrap_canonical_fill_mode(base, diag, loop_order)
+        ex = workspace_transform(ex)
         display(ex)
         return
     end
