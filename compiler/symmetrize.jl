@@ -1060,7 +1060,7 @@ function workspace_transform(ex)
         temps = Dict()
         body = Rewrite(Postwalk(@rule assign(~lhs, +, ~rhs) => begin
             if @capture lhs access(~tn, ~mode, ~idxs...) 
-                if isempty(intersect(Set(loop_idxs), Set(idxs)))
+                if length(idxs) > 0 && isempty(intersect(Set(loop_idxs), Set(idxs)))
                     var = :temp
                     temps[var] = lhs
                     lhs = var
