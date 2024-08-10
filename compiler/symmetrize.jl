@@ -302,9 +302,10 @@ swapped in all nonsymmetric tensors. Return list of resulting assignment express
 """
 function decouple_grouped_updates(ex, subsymmetry, issymmetric, permutable_idxs)
     assignments = []
-    factor = Int(updates_count(ex) / length(permutable_idxs))
+    factor = updates_count(ex) / length(permutable_idxs)
+    factor = isinteger(factor) ? Int(factor) : factor
     Postwalk(@rule assign(~lhs, +, ~rhs) => begin
-        if (@capture rhs call(*, ~n, ~rhs_2)) && isa(n.val, Number)
+        if isinteger(factor) && (@capture rhs call(*, ~n, ~rhs_2)) && isa(n.val, Number)
             decoupled = false
             for sym in subsymmetry
                 @capture lhs access(~tn, ~idxs...)

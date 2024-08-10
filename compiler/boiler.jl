@@ -22,9 +22,14 @@ symmetrize(ex, [A], [i, j])
 ex = @finch_program C[i, j] += A[i, k] * B[k, j]
 symmetrize(ex, [A], [i, k, j])
 
-# ssyrk
+# ssyrk (A symmetric)
 ex = @finch_program C[i, j] += A[i, k] * A[k, j]
 symmetrize(ex, [A], [i, k, j])
+
+# ssyrk
+ex = @finch_program C[i, j] += A[i, k] * A[k, j]
+symmetrize(ex, [A], [])
+
 
 # ttm
 ex = @finch_program C[i, j, l] += A[k, j, l] * B[k, i]
