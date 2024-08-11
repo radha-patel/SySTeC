@@ -309,7 +309,7 @@ function decouple_grouped_updates(ex, subsymmetry, issymmetric, permutable_idxs)
             decoupled = false
             for sym in subsymmetry
                 @capture lhs access(~tn, ~idxs...)
-                if !(sym[end] in idxs)
+                if !(sym[1] in idxs) && !(sym[end] in idxs)
                     continue
                 end
                 if n.val % factor == 0 && n.val / factor > 1
