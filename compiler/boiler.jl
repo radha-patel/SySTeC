@@ -10,8 +10,14 @@ l = index(:l)
 m = index(:m)
 n = index(:n)
 
+y = :y
+x = :x
+
 # ssymv
 ex = @finch_program C[i] += A[i, j] * B[j]
+symmetrize(ex, [A], [i, j])
+
+ex = @finch_program y[i] += A[i, j] * x[j]
 symmetrize(ex, [A], [i, j])
 
 # syprd
@@ -27,8 +33,8 @@ ex = @finch_program C[i, j] += A[i, k] * A[k, j]
 symmetrize(ex, [A], [i, k, j])
 
 # ssyrk
-ex = @finch_program C[i, j] += A[i, k] * A[k, j]
-symmetrize(ex, [A], [])
+ex = @finch_program C[i, j] += A[i, k] * A[j, k]
+symmetrize(ex, [], [])
 
 
 # ttm

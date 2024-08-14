@@ -1,6 +1,7 @@
 using Finch
 using Finch: freshen, JuliaContext
 using Finch.FinchNotation
+using Finch.FinchNotation: FinchNode, FinchNodeInstance
 using RewriteTools
 using RewriteTools.Rewriters
 using Combinatorics
@@ -137,6 +138,17 @@ end
 is_index(ex::FinchNode) = ex.kind === index
 is_commutative(op) = typeof(op.val) == typeof(*) ? true : false
 
+function _permute_indices(ex, idxs, permutations)
+    permuted_exs = []
+    for perm in permutations
+        ex_2 = Rewrite(Postwalk(@rule ~idx::is_index => begin
+            idx in idxs ? perm[findfirst(i -> i == idx, idxs)] : idx
+        end))(ex)
+        push!(permuted_exs, ex_2)
+    end
+    return permuted_exs
+end
+
 """
     permute_indices(ex, idxs, permutations)
 
@@ -145,16 +157,9 @@ indices permutated such that each index idxs[j] is replaced with index
 permutations[i][j]
 """
 function permute_indices(ex, idxs, permutations)
-    permuted_exs = []
-    for perm in permutations
-        ex_2 = Rewrite(Postwalk(@rule ~idx::is_index => begin
-            idx in idxs ? perm[findfirst(i -> i == idx, idxs)] : idx
-        end))(ex)
-        push!(permuted_exs, ex_2)
-    end
+    permuted_exs = _permute_indices(ex, idxs, permutations)
     return block(permuted_exs...)
 end
-
 
 """
     normalize(ex, issymmetric)
@@ -309,12 +314,12 @@ function decouple_grouped_updates(ex, subsymmetry, issymmetric, permutable_idxs)
             decoupled = false
             for sym in subsymmetry
                 @capture lhs access(~tn, ~idxs...)
-                if !(sym[1] in idxs) && !(sym[end] in idxs)
+                if !(sym[1] in idxs)
                     continue
                 end
                 if n.val % factor == 0 && n.val / factor > 1
-                    idx_2 = sym[end]
-                    for idx_1 in sym[1:end-1]
+                    idx_1 = sym[1]
+                    for idx_2 in sym[2:end]
                         lhs_swapped = swap_indices(lhs, idx_1, idx_2, issymmetric)
                         rhs_swapped = swap_indices(rhs_2, idx_1, idx_2, issymmetric)
                         new_rhs = (factor == 1 ? rhs_swapped : call(*, factor, rhs_swapped))
@@ -565,10 +570,12 @@ function exploit_output_replication(ex)
         return sieve(cond, body)
     end))(ex)
 
-    Rewrite(Postwalk(@rule sieve(~cond::((c) -> !is_base(c)), ~body) => begin
+    ex = Rewrite(Postwalk(@rule sieve(~cond::((c) -> !is_base(c)), ~body) => begin
         body, replicate = exploit_output_replication_edge(body, fully_replicable, replicate)
         return sieve(cond, body)
     end))(ex)
+
+    return ex, replicate
 end
 
 """
@@ -937,7 +944,7 @@ lists of length two corresponding to the indices that need to be transposed in `
 the new tensor.
 """
 function transpose_operands(ex, issymmetric, loop_order)
-    @capture ex assign(access(~lhs, ~updater, ~idxs...), ~op, ~rhs)
+    @capture ex assign(~lhs, ~op, ~rhs)
 
     transposed = Dict()
     count = 0
@@ -960,7 +967,27 @@ function transpose_operands(ex, issymmetric, loop_order)
         return access(new_tn, mode, transposed_idxs...)
     end))(rhs)
 
-    ex = assign(access(lhs, updater, idxs...), op, rhs)
+    count = 0
+    lhs = Rewrite(Postwalk(@rule access(~tn::((t) -> !issymmetric(t)), ~mode, ~idxs...) => begin
+        idxs_depths = [(findfirst(x -> x == idx, loop_order), idx) for idx in idxs]
+        transposed_idxs = [tup[2] for tup in sort(idxs_depths)]
+        swaps = Set(find_swaps(idxs, transposed_idxs))
+
+        if isempty(swaps)
+            return nothing
+        end
+
+        if haskey(transposed, (tn, swaps))
+            new_tn = transposed[(tn, swaps)]
+        else
+            count += 1
+            new_tn = get_transposed_tn_name(tn, count)
+            transposed[(tn, swaps)] = new_tn
+        end
+        return access(new_tn, mode, transposed_idxs...)
+    end))(lhs)
+
+    ex = assign(lhs, op, rhs)
     return ex, transposed
 end
 
@@ -1007,6 +1034,7 @@ function insert_lookup(ex, conditions)
             end
             push!(assignments, assign(lhs, +, call(*, :factor, rhs)))
         end)(block)
+        # TODO: what if not the same factor??!
         if same_factor && factor != nothing
             sort!(assignments, by = assignment -> hash(assignment))
             lookup_block[hash(assignments)] = assignments
@@ -1064,16 +1092,17 @@ function workspace_transform(ex)
                 if length(idxs) > 0 && isempty(intersect(Set(loop_idxs), Set(idxs)))
                     var = :temp
                     temps[var] = lhs
-                    lhs = var
+                    lhs = access(literal(var), literal(Reader()))
                 end
             end
             assign(lhs, +, rhs)
         end))(body)
+        body = loop(idx, dim, body)
         for (var, val) in pairs(temps)
-            body = define(var, val, body)
+            body = block(declare(var, literal(0)), body)
             all_temps[var] = val
         end
-        loop(idx, dim, body)
+        body
     end))(ex)
 
     loop_idxs = []
@@ -1083,13 +1112,27 @@ function workspace_transform(ex)
             @capture val access(~tn, ~mode, ~idxs...) 
             if all(x -> x in loop_idxs, idxs)
                 if @capture body block(~s...)
-                    body = block(s..., assign(val, +, var))
+                    body = block(s..., assign(val, +, access(literal(var), literal(Reader()))))
                 end
             end
         end
         loop(idx, dim, body)
     end))(ex)
     ex
+end
+
+function is_binary_op(ex)
+    return @capture ex assign(~lhs, ~mode, call(~op, access(~tn, reader, ~idxs_1...), access(~tn, reader, ~idxs_2...)))
+end
+
+function triangularize_binary_op(ex)
+    issymmetric(tn) = false
+
+    @capture ex assign(access(~lhs_tn, updater, ~idxs...), ~mode, call(~op, access(~tn, reader, ~idxs_1...), access(~tn, reader, ~idxs_2...)))
+    perms = _permute_indices(ex, idxs, permutations(idxs))
+    normalized = [normalize(perm, issymmetric) for perm in perms]
+
+    display(normalized)
 end
 
 """
@@ -1104,6 +1147,8 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
 
+    transposed = Dict()
+    replicate = Dict()
     @capture ex assign(access(~lhs, updater, ~idxs...), ~op, ~rhs)
     if !isempty(loop_order)
         all_idxs = get_idxs(ex)
@@ -1115,7 +1160,10 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
     permutable_idxs = collect(Set(Iterators.flatten(permutable_idxs)))
 
-    # Clear noncanonical values in symmetric matrix
+    # Clear noncanonical values in symmetric matrix 
+    # Bc the extra check from a condition restricting access to just 1/2 of a matrix is expensive
+    # With tensors of higher dimensionality, the cost of such a condition is minor compared to the benefit 
+    # from reducing reads
     if length(loop_order) == 2 && length(permutable_idxs) == 2
         base = get_updates(ex, permutable_idxs, issymmetric)
         base = group_assignments(base)
@@ -1123,14 +1171,21 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
         diag = get_diag_assignment(ex, issymmetric, loop_order)
         ex = wrap_canonical_fill_mode(base, diag, loop_order)
         ex = workspace_transform(ex)
-        display(ex)
+        # io = IOBuffer()
+        # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex, 0)
+        # return String(take!(io))
+        return ex, transposed, replicate
+    end
+
+    if is_binary_op(ex)
+        triangularize_binary_op(ex)
         return
     end
 
     conditions = get_conditions(permutable_idxs, diagonals)
     ex = add_updates(ex, conditions, permutable_idxs, issymmetric)
     ex = group_assignments(ex)
-    ex = exploit_output_replication(ex)
+    ex, replicate = exploit_output_replication(ex)
     # TODO: grouping takes a LONG time - constrain when we actually do this?
     grouped, ex = group_sieves(ex, issymmetric, permutable_idxs)
     # grouped = false
@@ -1139,11 +1194,12 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
     # end
     ex = triangularize(ex, permutable_idxs, diagonals)
     if !grouped 
-        # ex_2 = consolidate_conditions(ex)
+        ex_2 = consolidate_conditions(ex)
         # TODO: maybe there is a better metric to determine which expression to keep?
-        # ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
+        ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
         ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
         ex = insert_loops(ex, permutable_idxs, loop_order)
+        return ex, transposed, replicate
     else
         ex_base, ex_edge = separate_loop_nests(ex)
         if lookup_table
@@ -1155,7 +1211,174 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
         ex_edge = insert_identity(ex_edge)
         ex_base = insert_loops(ex_base, permutable_idxs, loop_order)
         ex_edge = insert_loops(ex_edge, permutable_idxs, loop_order)
-        display(ex_base)
-        display(ex_edge)
+        # open("output.txt", "w") do io
+            # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_base, 0)
+            # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_edge, 0)
+        # end
+
+        # io = open(“filename”, “w”)
+        # close(io)
+
+        io = IOBuffer()
+        Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_base, 0)
+        Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_edge, 0)
+        result = String(take!(io))
+        println("before printing")
+        println(result)
+        # Finch.display_statement(ex_base)
+        # Finch.display_statement(ex_edge)
     end
+end
+
+function initialize(original_ex, symmetrized_ex, transposed, replicate)
+    @capture original_ex assign(~lhs, ~op, ~rhs)
+    @capture lhs access(~output, ~idxs...)
+    for (key, transposed_tn) in transposed
+        original_tn, idxs = key
+        if original_tn == output
+            output = transposed_tn
+            break
+        end
+    end
+
+    @capture lhs access(~output, ~idxs...)
+    for (idxs, tn) in replicate
+        output = tn
+        break
+    end
+
+    output = get(transposed, output, output)
+
+    return block(declare(output, literal(0)), symmetrized_ex, yieldbind(output))
+end
+
+function remove_indices!(lst, indices)
+    # Sort indices in descending order to avoid indexing issues
+    sorted_indices = sort(indices, rev=true)
+    
+    # Remove elements at the specified indices
+    for idx in sorted_indices
+        if 1 <= idx <= length(lst)
+            splice!(lst, idx)
+        end
+    end
+end
+
+function remove_paired_blocks(lines)
+    begin_lines = []
+    to_remove = []
+    counter = 0
+    for i in 1:length(lines)
+        if occursin("begin", lines[i])
+            push!(begin_lines, counter)
+            push!(to_remove, i)
+        end
+        if occursin("begin", lines[i]) || occursin("for", lines[i]) || occursin("let", lines[i]) || occursin("if", lines[i])
+            counter += 1
+        end
+        if occursin("end", lines[i])
+            counter -= 1
+            if counter in begin_lines
+                push!(to_remove, i)
+            end
+        end
+    end
+    remove_indices!(lines, to_remove)
+    return lines
+end
+
+function clean(ex_str)
+    ex_str = replace(ex_str, "virtual(Dimensionless)" => "_")
+    ex_str = replace(ex_str, "<<+>>=" => "+=")
+    lines = split(ex_str, "\n")
+    lines = remove_paired_blocks(lines)
+    lines = [strip(line) for line in lines]
+
+    tab = "    "
+    # Start at 1 because method signature and ending are at tab_count=0
+    tab_count = 1
+    result = ""
+    for line in lines
+        if occursin("end", line)
+            tab_count -= 1
+        end
+
+        # line-by-line transforms
+        line = replace(line, r"\*\(([^,]+),\s*(.+)\)" => s"\1 * \2")
+        line = replace(line, r"\((\w+)\)" => s"\1")
+        line = replace(line, r"<=(\s*)\((\w+),\s*(\w+)\)" => s"\2 <= \3")
+        line = replace(line, r"<(\s*)\((\w+),\s*(\w+)\)" => s"\2 < \3")
+        line = replace(line, r"(\w+)\s*<=\s*(\w+)" => s"(\1 <= \2)")
+        line = replace(line, r"(\w+)\s*<\s*(\w+)" => s"(\1 < \2)")
+        line = replace(line, r"and\(([^,]+),\s*([^)]*)\)" => s"\1 && \2")
+
+        result *= repeat(tab, max(tab_count, 0)) * line * "\n"
+        if occursin("for", line) || occursin("begin", line) || occursin("let", line) || occursin("if", line)
+            tab_count += 1
+        end
+    end
+    return result
+end
+
+function get_all_variables(prgm)
+    pattern = r"(\w+)\["
+    matches = [replace(m.match, "[" => "") for m in eachmatch(pattern, prgm)]
+    return unique(matches)
+end
+
+function generate_method_signature(prgm, name)
+    variables = get_all_variables(prgm)
+    variables_signature = join(sort(variables), ", ")
+    signature = "eval(@finch_kernel mode=:fast function $name($variables_signature)\n"
+    ending = "end)"
+    return signature * prgm * ending
+end
+
+function execute(ex, func_name, symmetric_tns, loop_order, filename)
+    symmetrized_ex, transposed, replicate = symmetrize(ex, symmetric_tns, loop_order) 
+    prgm = initialize(ex, symmetrized_ex, transposed, replicate)
+
+    io = IOBuffer()
+    Finch.FinchNotation.display_statement(io, MIME"text/plain", prgm, 0)
+    prgm_str = String(take!(io))
+
+    prgm = clean(prgm_str)
+    prgm = generate_method_signature(prgm, func_name)
+    open(filename, "w") do file
+        write(file, prgm)
+    end
+end
+
+function generate_code()
+    y = :y
+    x = :x
+    A = :A
+    B = :B 
+    C = :C
+
+    i = index(:i)
+    j = index(:j)
+    k = index(:k)
+    l = index(:l)
+
+    ex = @finch_program y[i] += A[i, j] * x[j]
+    func_name = "ssymv_finch_opt_helper"
+    symmetric_tns = [A]
+    loop_order = [i, j]
+    filename = "ssymv.jl"
+    execute(ex, func_name, symmetric_tns, loop_order, filename)
+
+    ex = @finch_program C[i, j] += A[i, k] * B[k, j]
+    func_name = "ssymm_finch_opt_helper"
+    symmetric_tns = [A]
+    loop_order = [j, i, k]
+    filename = "ssymm.jl"
+    execute(ex, func_name, symmetric_tns, loop_order, filename)
+
+    ex = @finch_program C[i, j, l] += A[k, j, l] * B[k, i]
+    func_name = "ttm_finch_opt_helper"
+    symmetric_tns = [A]
+    loop_order = [i, j, k, l]
+    filename = "ttm.jl"
+    execute(ex, func_name, symmetric_tns, loop_order, filename)
 end

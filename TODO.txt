@@ -1,0 +1,18 @@
+TODOs FOR ARTIFACT EVALUATION:
+
+compiler additions:
+[x] figure out lookup table bug
+[] figure out better metric for consolidating conditions
+[] work for no symmetry
+[] account for partial symmetry
+[] test for other operators -> validate for addition
+
+containerization:
+[] make docker container
+
+documentation:
+[] write test cases to validate results
+[] better README
+[] docstrings
+[] split code up into multiple files
+

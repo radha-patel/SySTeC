@@ -1,0 +1,46 @@
+for m = virtual(Dimensionless), l = virtual(Dimensionless), k = virtual(Dimensionless), i = virtual(Dimensionless), j = virtual(Dimensionless)
+  if and(<(i, k), <(k, l), <(l, m))
+    let B_T_jk = B_T[j, k], B_T_jm = B_T[j, m], B_T_ji = B_T[j, i], A_iklm = A[i, k, l, m], B_T_jl = B_T[j, l]
+      begin
+        C[m, j] <<+>>= *(6, *(B_T_jl, B_T_ji, A_iklm, B_T_jk))
+        C[k, j] <<+>>= *(6, *(B_T_jm, B_T_jl, B_T_ji, A_iklm))
+        C[l, j] <<+>>= *(6, *(B_T_jm, B_T_ji, A_iklm, B_T_jk))
+        C[i, j] <<+>>= *(6, *(B_T_jm, B_T_jl, A_iklm, B_T_jk))
+      end
+    end
+  end
+endfor m = virtual(Dimensionless), l = virtual(Dimensionless), k = virtual(Dimensionless), i = virtual(Dimensionless), j = virtual(Dimensionless)
+  if and(<=(i, k), <=(k, l), <=(l, m))
+    let ik_eq = ==(identity(i), identity(k)), kl_eq = ==(identity(k), identity(l)), lm_eq = ==(identity(l), identity(m)), A_iklm = A[i, k, l, m], B_T_jk = B_T[j, k], B_T_jl = B_T[j, l], B_T_jm = B_T[j, m], B_T_ji = B_T[j, i]
+      begin
+        if or(and(ik_eq, !(kl_eq), !(lm_eq)), and(!(ik_eq), kl_eq, !(lm_eq)), and(!(ik_eq), !(kl_eq), lm_eq))
+          begin
+            C[l, j] <<+>>= *(3, *(B_T_jm, B_T_ji, A_iklm, B_T_jk))
+            C[k, j] <<+>>= *(3, *(B_T_jm, B_T_jl, B_T_ji, A_iklm))
+            C[i, j] <<+>>= *(3, *(B_T_jm, B_T_jl, A_iklm, B_T_jk))
+            C[m, j] <<+>>= *(3, *(B_T_jl, B_T_ji, A_iklm, B_T_jk))
+          end
+        end
+        if or(and(ik_eq, kl_eq, !(lm_eq)), and(!(ik_eq), kl_eq, lm_eq))
+          begin
+            C[k, j] <<+>>= *(B_T_jm, B_T_jl, B_T_ji, A_iklm)
+            C[l, j] <<+>>= *(B_T_jm, B_T_ji, A_iklm, B_T_jk)
+            C[i, j] <<+>>= *(B_T_jm, B_T_jl, A_iklm, B_T_jk)
+            C[m, j] <<+>>= *(B_T_jl, B_T_ji, A_iklm, B_T_jk)
+          end
+        end
+        if and(ik_eq, !(kl_eq), lm_eq)
+          begin
+            C[i, j] <<+>>= *(3, *(B_T_jm, B_T_jl, A_iklm, B_T_jk))
+            C[l, j] <<+>>= *(3, *(B_T_jm, B_T_ji, A_iklm, B_T_jk))
+          end
+        end
+        if and(ik_eq, kl_eq, lm_eq)
+          begin
+            C[i, j] <<+>>= *(B_T_jm, B_T_jl, A_iklm, B_T_jk)
+          end
+        end
+      end
+    end
+  end
+end
