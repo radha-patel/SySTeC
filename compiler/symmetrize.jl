@@ -338,7 +338,7 @@ function decouple_grouped_updates(ex, subsymmetry, issymmetric, permutable_idxs)
             push!(assignments, assign(lhs, +, rhs))
         end
     end)(ex)
-    return assignments
+    return sort(assignments, by = a->hash(a))
 end
 
 
@@ -1149,7 +1149,7 @@ function triangularize_binary_op(ex)
 end
 
 """
-    symmetrize2(ex, symmetric_tns)
+    symmetrize(ex, symmetric_tns)
 
     Rewrite ex to exploit symmetry in the tensors marked as symmetric in symmetric_tns
 """
@@ -1172,6 +1172,7 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, include_lo
     # TODO: given multiple symmetric matrices, how many is it worth optimizing for
     permutable_idxs = get_permutable_idxs(rhs, issymmetric)
     permutable_idxs = collect(Set(Iterators.flatten(permutable_idxs)))
+    permutable_idxs = order_canonically(permutable_idxs)
 
     # Clear noncanonical values in symmetric matrix 
     # Bc the extra check from a condition restricting access to just 1/2 of a matrix is expensive
@@ -1192,6 +1193,7 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, include_lo
 
     if is_binary_op(ex)
         ex = triangularize_binary_op(ex)
+        ex = insert_loops(ex, permutable_idxs, loop_order)
         return ex, nothing, transposed, replicate, nothing
     end
 
@@ -1225,21 +1227,6 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, include_lo
         ex_base = insert_loops(ex_base, permutable_idxs, loop_order)
         ex_edge = insert_loops(ex_edge, permutable_idxs, loop_order)
         return ex_base, ex_edge, transposed, replicate, lookup_table
-        # open("output.txt", "w") do io
-            # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_base, 0)
-            # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_edge, 0)
-        # end
-
-        # io = open(“filename”, “w”)
-        # close(io)
-
-        io = IOBuffer()
-        Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_base, 0)
-        Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_edge, 0)
-        result = String(take!(io))
-        println(result)
-        # Finch.display_statement(ex_base)
-        # Finch.display_statement(ex_edge)
     end
 end
 
@@ -1385,68 +1372,4 @@ function execute(ex, func_name, symmetric_tns, loop_order, filename)
         content = format_lookup_table(lookup_table)
         write_to_file(content, filename, true)
     end
-end
-
-function generate_code()
-    y = :y
-    x = :x
-    A = :A
-    B = :B 
-    C = :C
-
-    i = index(:i)
-    j = index(:j)
-    k = index(:k)
-    l = index(:l)
-    m = index(:m)
-    n = index(:n)
-
-    ex = @finch_program y[i] += A[i, j] * x[j]
-    func_name = "ssymv_finch_opt_helper"
-    symmetric_tns = [A]
-    loop_order = [i, j]
-    filename = "ssymv.jl"
-    execute(ex, func_name, symmetric_tns, loop_order, filename)
-
-    ex = @finch_program C[i, j] += A[i, k] * A[j, k]
-    func_name = "ssyrk_finch_opt_helper"
-    symmetric_tns = []
-    loop_order = [i, j, k]
-    filename = "ssyrk.jl"
-    execute(ex, func_name, symmetric_tns, loop_order, filename)
-
-    ex = @finch_program C[i, j] += A[i, k] * B[k, j]
-    func_name = "ssymm_finch_opt_helper"
-    symmetric_tns = [A]
-    loop_order = [j, i, k]
-    filename = "ssymm.jl"
-    execute(ex, func_name, symmetric_tns, loop_order, filename)
-
-    ex = @finch_program C[i, j, l] += A[k, j, l] * B[k, i]
-    func_name = "ttm_finch_opt_helper"
-    symmetric_tns = [A]
-    loop_order = [i, j, k, l]
-    filename = "ttm.jl"
-    execute(ex, func_name, symmetric_tns, loop_order, filename)
-
-    ex = @finch_program C[i, j] += A[i, k, l] * B[l, j] * B[k, j]
-    func_name = "mttkrp_dim3_finch_opt_helper"
-    symmetric_tns = [A]
-    loop_order = [j, i, k, l]
-    filename = "mttkrp_dim3.jl"
-    execute(ex, func_name, symmetric_tns, loop_order, filename)
-
-    ex = @finch_program C[i, j] += A[i, k, l, m] * B[l, j] * B[k, j] * B[m, j]
-    func_name = "mttkrp_dim4_finch_opt_helper"
-    symmetric_tns = [A]
-    loop_order = [j, i, k, l, m]
-    filename = "mttkrp_dim4.jl"
-    execute(ex, func_name, symmetric_tns, loop_order, filename)
-
-    ex = @finch_program C[i, j] += A[i, k, l, m, n] * B[l, j] * B[k, j] * B[m, j] * B[n, j]
-    func_name = "mttkrp_dim5_finch_opt_helper"
-    symmetric_tns = [A]
-    loop_order = [j, i, k, l, m, n]
-    filename = "mttkrp_dim5.jl"
-    execute(ex, func_name, symmetric_tns, loop_order, filename)
 end
