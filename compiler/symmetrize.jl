@@ -860,9 +860,12 @@ for a diagonal-related update.
 """
 function insert_identity(ex)
     if @capture ex sieve(~triangular_condition, ~ex_2)
-        ex_2 = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
+        # ex_2 = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
+        #     call(op, call(identity, idx_1), call(identity, idx_2))
+        # end))(ex_2)
+        triangular_condition = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
             call(op, call(identity, idx_1), call(identity, idx_2))
-        end))(ex_2)
+        end))(triangular_condition)
         ex = sieve(triangular_condition, ex_2)
     end
     ex 
@@ -1122,17 +1125,27 @@ function workspace_transform(ex)
 end
 
 function is_binary_op(ex)
-    return @capture ex assign(~lhs, ~mode, call(~op, access(~tn, reader, ~idxs_1...), access(~tn, reader, ~idxs_2...)))
+    issymmetric(tn) = false
+
+    if !(@capture ex assign(access(~lhs_tn, updater, ~idxs...), ~mode, ~rhs))
+        return false
+    end
+    
+    perms = _permute_indices(ex, idxs, permutations(idxs))
+    normalized = [normalize(perm, issymmetric) for perm in perms]
+    
+    for normalized_ex in normalized
+        @capture normalized_ex assign(~lhs, ~mode, ~rhs_normalized)
+        if normalize(rhs, issymmetric) != rhs_normalized
+            return false
+        end
+    end
+    return true
 end
 
 function triangularize_binary_op(ex)
-    issymmetric(tn) = false
-
     @capture ex assign(access(~lhs_tn, updater, ~idxs...), ~mode, call(~op, access(~tn, reader, ~idxs_1...), access(~tn, reader, ~idxs_2...)))
-    perms = _permute_indices(ex, idxs, permutations(idxs))
-    normalized = [normalize(perm, issymmetric) for perm in perms]
-
-    display(normalized)
+    return triangularize(ex, idxs)
 end
 
 """
@@ -1143,7 +1156,7 @@ end
 # TODO: transpose some tensors?
 # TODO: option to generate code to initialize tensors 
 # TODO: stress testing - for what sizes/complexities of tensors/kernels does this work?
-function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_table=false)
+function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, include_lookup_table=false)
     # helper methods
     issymmetric(tn) = tn.val in symmetric_tns
 
@@ -1174,12 +1187,12 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
         # io = IOBuffer()
         # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex, 0)
         # return String(take!(io))
-        return ex, transposed, replicate
+        return ex, nothing, transposed, replicate, nothing
     end
 
     if is_binary_op(ex)
-        triangularize_binary_op(ex)
-        return
+        ex = triangularize_binary_op(ex)
+        return ex, nothing, transposed, replicate, nothing
     end
 
     conditions = get_conditions(permutable_idxs, diagonals)
@@ -1199,18 +1212,19 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
         ex = conditions_count(ex_2) < conditions_count(ex) ? ex_2 : ex
         ex = consolidate_reads(ex) # TODO: need to figure out best place to do this (and how - prewalk or postwalk?)
         ex = insert_loops(ex, permutable_idxs, loop_order)
-        return ex, transposed, replicate
+        return ex, nothing, transposed, replicate, nothing
     else
+        lookup_table = nothing
         ex_base, ex_edge = separate_loop_nests(ex)
-        if lookup_table
+        if include_lookup_table || updates_count(ex_base) > 24
             lookup_table, ex_edge = insert_lookup(ex_edge, conditions[end])
-            println(lookup_table)
         end
         ex_base = consolidate_reads(ex_base)
         ex_edge = consolidate_reads(ex_edge)
         ex_edge = insert_identity(ex_edge)
         ex_base = insert_loops(ex_base, permutable_idxs, loop_order)
         ex_edge = insert_loops(ex_edge, permutable_idxs, loop_order)
+        return ex_base, ex_edge, transposed, replicate, lookup_table
         # open("output.txt", "w") do io
             # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_base, 0)
             # Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_edge, 0)
@@ -1223,7 +1237,6 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, lookup_tab
         Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_base, 0)
         Finch.FinchNotation.display_statement(io, MIME"text/plain", ex_edge, 0)
         result = String(take!(io))
-        println("before printing")
         println(result)
         # Finch.display_statement(ex_base)
         # Finch.display_statement(ex_edge)
@@ -1241,7 +1254,6 @@ function initialize(original_ex, symmetrized_ex, transposed, replicate)
         end
     end
 
-    @capture lhs access(~output, ~idxs...)
     for (idxs, tn) in replicate
         output = tn
         break
@@ -1304,14 +1316,13 @@ function clean(ex_str)
         end
 
         # line-by-line transforms
-        line = replace(line, r"\*\(([^,]+),\s*(.+)\)" => s"\1 * \2")
         line = replace(line, r"\((\w+)\)" => s"\1")
-        line = replace(line, r"<=(\s*)\((\w+),\s*(\w+)\)" => s"\2 <= \3")
-        line = replace(line, r"<(\s*)\((\w+),\s*(\w+)\)" => s"\2 < \3")
-        line = replace(line, r"(\w+)\s*<=\s*(\w+)" => s"(\1 <= \2)")
-        line = replace(line, r"(\w+)\s*<\s*(\w+)" => s"(\1 < \2)")
-        line = replace(line, r"and\(([^,]+),\s*([^)]*)\)" => s"\1 && \2")
+        line = replace(line, r"<=(\s*)\((\w+),\s*(\w+)\)" => s"(\2 <= \3)")
+        line = replace(line, r"<(\s*)\((\w+),\s*(\w+)\)" => s"(\2 < \3)")
+        line = replace(line, r"==(\s*)\((\w+),\s*(\w+)\)" => s"(\2 == \3)")
+        line = replace(line, r"identity([a-zA-Z_]\w*)" => s"identity(\1)")
 
+        
         result *= repeat(tab, max(tab_count, 0)) * line * "\n"
         if occursin("for", line) || occursin("begin", line) || occursin("let", line) || occursin("if", line)
             tab_count += 1
@@ -1330,13 +1341,12 @@ function generate_method_signature(prgm, name)
     variables = get_all_variables(prgm)
     variables_signature = join(sort(variables), ", ")
     signature = "eval(@finch_kernel mode=:fast function $name($variables_signature)\n"
-    ending = "end)"
+    ending = "end)\n\n"
     return signature * prgm * ending
 end
 
-function execute(ex, func_name, symmetric_tns, loop_order, filename)
-    symmetrized_ex, transposed, replicate = symmetrize(ex, symmetric_tns, loop_order) 
-    prgm = initialize(ex, symmetrized_ex, transposed, replicate)
+function make_runnable(ex, ex_symmetrized, func_name, symmetric_tns, transposed, replicate)
+    prgm = initialize(ex, ex_symmetrized, transposed, replicate)
 
     io = IOBuffer()
     Finch.FinchNotation.display_statement(io, MIME"text/plain", prgm, 0)
@@ -1344,8 +1354,36 @@ function execute(ex, func_name, symmetric_tns, loop_order, filename)
 
     prgm = clean(prgm_str)
     prgm = generate_method_signature(prgm, func_name)
-    open(filename, "w") do file
+end
+
+function write_to_file(prgm, filename, append)
+    open(filename, append ? "a" : "w") do file
         write(file, prgm)
+    end
+end
+
+function format_lookup_table(lookup_table::Vector{T}, chunk_size::Int=15) where T
+    chunks = [lookup_table[i:min(i+chunk_size-1, end)] for i in 1:chunk_size:length(lookup_table)]
+    formatted = join([join(chunk, ", ") for chunk in chunks], "\n")
+    return "lookup = $formatted"
+end
+
+function execute(ex, func_name, symmetric_tns, loop_order, filename)
+    ex_base, ex_edge, transposed, replicate, lookup_table = symmetrize(ex, symmetric_tns, loop_order) 
+    
+    if ex_edge != nothing
+        prgm = make_runnable(ex, ex_base, func_name * "_base", symmetric_tns, transposed, replicate)
+        write_to_file(prgm, filename, false)
+        prgm = make_runnable(ex, ex_edge, func_name * "_edge", symmetric_tns, transposed, replicate)
+        write_to_file(prgm, filename, true)
+    else
+        prgm = make_runnable(ex, ex_base, func_name, symmetric_tns, transposed, replicate)
+        write_to_file(prgm, filename, false)
+    end
+
+    if lookup_table != nothing
+        content = format_lookup_table(lookup_table)
+        write_to_file(content, filename, true)
     end
 end
 
@@ -1360,12 +1398,21 @@ function generate_code()
     j = index(:j)
     k = index(:k)
     l = index(:l)
+    m = index(:m)
+    n = index(:n)
 
     ex = @finch_program y[i] += A[i, j] * x[j]
     func_name = "ssymv_finch_opt_helper"
     symmetric_tns = [A]
     loop_order = [i, j]
     filename = "ssymv.jl"
+    execute(ex, func_name, symmetric_tns, loop_order, filename)
+
+    ex = @finch_program C[i, j] += A[i, k] * A[j, k]
+    func_name = "ssyrk_finch_opt_helper"
+    symmetric_tns = []
+    loop_order = [i, j, k]
+    filename = "ssyrk.jl"
     execute(ex, func_name, symmetric_tns, loop_order, filename)
 
     ex = @finch_program C[i, j] += A[i, k] * B[k, j]
@@ -1380,5 +1427,26 @@ function generate_code()
     symmetric_tns = [A]
     loop_order = [i, j, k, l]
     filename = "ttm.jl"
+    execute(ex, func_name, symmetric_tns, loop_order, filename)
+
+    ex = @finch_program C[i, j] += A[i, k, l] * B[l, j] * B[k, j]
+    func_name = "mttkrp_dim3_finch_opt_helper"
+    symmetric_tns = [A]
+    loop_order = [j, i, k, l]
+    filename = "mttkrp_dim3.jl"
+    execute(ex, func_name, symmetric_tns, loop_order, filename)
+
+    ex = @finch_program C[i, j] += A[i, k, l, m] * B[l, j] * B[k, j] * B[m, j]
+    func_name = "mttkrp_dim4_finch_opt_helper"
+    symmetric_tns = [A]
+    loop_order = [j, i, k, l, m]
+    filename = "mttkrp_dim4.jl"
+    execute(ex, func_name, symmetric_tns, loop_order, filename)
+
+    ex = @finch_program C[i, j] += A[i, k, l, m, n] * B[l, j] * B[k, j] * B[m, j] * B[n, j]
+    func_name = "mttkrp_dim5_finch_opt_helper"
+    symmetric_tns = [A]
+    loop_order = [j, i, k, l, m, n]
+    filename = "mttkrp_dim5.jl"
     execute(ex, func_name, symmetric_tns, loop_order, filename)
 end
