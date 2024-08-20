@@ -158,6 +158,7 @@ permutations[i][j]
 """
 function permute_indices(ex, idxs, permutations)
     permuted_exs = _permute_indices(ex, idxs, permutations)
+    permuted_exs = sort(permuted_exs, by = ex->hash(ex))
     return block(permuted_exs...)
 end
 
@@ -480,6 +481,13 @@ function exploit_output_replication_base(ex)
     ex, replicate, fully_replicable
 end
 
+function sort_idxs_at(values_list, indices)
+    values_to_sort = [values_list[i] for i in indices]
+    sorted_values = sort(values_to_sort, by = i->i.val)
+    for (i, idx) in enumerate(indices)
+        values_list[idx] = sorted_values[i]
+    end
+end
 
 """
     exploit_output_replication_edge(ex, fully_replicable, replicate)
@@ -517,9 +525,11 @@ function exploit_output_replication_edge(ex, fully_replicable, replicate)
     # with tensor that will later be replicated 
     if fully_replicable
         #TODO: should confirm that replicate dict only has one value if fully_replicable
+        replicable_idxs = collect(first(keys(replicate))[1])
         tn_2 = first(values(replicate))
         ex = Fixpoint(Rewrite(Postwalk(@rule assign(~lhs, +, ~rhs) => begin
                 if @capture lhs access(~tn, updater, ~idxs...)
+                    sort_idxs_at(idxs, replicable_idxs)
                     if tn != tn_2
                         lhs = access(tn_2, updater, idxs...)
                     end
@@ -661,6 +671,14 @@ function consolidate_reads(ex)
     end))(ex)
 end
 
+function get_triangular_condition(ex, permutable_idxs, diagonals=true)
+    idxs = order_canonically(permutable_idxs)
+    conditions = []
+    for i in 1:length(idxs)-1
+        push!(conditions, diagonals ? call(<=, idxs[i], idxs[i+1]) : call(<, idxs[i], idxs[i+1]))
+    end
+    return length(conditions) > 1 ? call(and, conditions...) : conditions[1]
+end
 
 """
     triangularize(ex, permutable_idxs)
@@ -673,12 +691,7 @@ function triangularize(ex, permutable_idxs, diagonals=true)
         ex = body
     end
 
-    idxs = order_canonically(permutable_idxs)
-    conditions = []
-    for i in 1:length(idxs)-1
-        push!(conditions, diagonals ? call(<=, idxs[i], idxs[i+1]) : call(<, idxs[i], idxs[i+1]))
-    end
-    condition = length(conditions) > 1 ? call(and, conditions...) : conditions[1]
+    condition = get_triangular_condition(ex, permutable_idxs, diagonals)
     return sieve(condition, ex)
 end
 
@@ -779,17 +792,20 @@ operate happens only once (no repeats).
 function consolidate_conditions(ex)
     conditions_map = Dict()
     @capture ex sieve(~base_condition, ~body)
-
     Postwalk(@rule sieve(~body_condition, ~body_2) => begin
         @capture body_2 block(~updates...)
         for update in updates
-            update_conditions = get(conditions_map, update, Set())
-            push!(update_conditions, body_condition)
-            push!(update_conditions, base_condition)
-            conditions_map[update] = update_conditions 
+            if update in keys(conditions_map)
+                continue
+            else
+                update_conditions = Set()
+                push!(update_conditions, body_condition)
+                push!(update_conditions, base_condition)
+                conditions_map[update] = update_conditions 
+            end
         end
     end)(body)
-    
+
     updates_map = Dict()
     for (update, conditions) in pairs(conditions_map)
         consolidated_condition = consolidate_comparisons(conditions)
@@ -802,7 +818,6 @@ function consolidate_conditions(ex)
     for (condition, updates) in pairs(updates_map)
         push!(sieves, sieve(condition, block(updates...)))
     end
-
     return block(sieves...)
 end
 
@@ -891,7 +906,11 @@ function separate_loop_nests(ex)
             end
         end)(ex_2)
     end
-    base[1], sieve(triangle_cond, block(edge...))
+
+    if length(base) != 0
+        return base[1], sieve(triangle_cond, block(edge...))
+    end
+    return nothing, sieve(triangle_cond, block(edge...))
 end
 
 
@@ -995,20 +1014,43 @@ function transpose_operands(ex, issymmetric, loop_order)
 end
 
 primes = [2, 3, 5, 7, 11, 13, 17]
-function set_lookup_idxs(table, cond, factor)
-    if @capture cond call(or, ~conds...) 
-        for cond in conds 
-            val = 1
-            if @capture cond call(and, ~equalities...)
-                for i in 1:length(equalities)
-                    if !(@capture equalities[i] call(!=, ~idx_1, ~idx_2))
-                        val *= primes[i]
-                    end
-                end
+function get_lookup_idx(cond)
+    val = 1
+    if @capture cond call(and, ~equalities...)
+        for i in 1:length(equalities)
+            if !(@capture equalities[i] call(!=, ~idx_1, ~idx_2))
+                val *= primes[i]
             end
-            table[val] = factor
         end
     end
+    return val
+end
+
+function set_lookup_idxs(table, cond, factor)
+    # given something like or(and(==(i, k), ==(k, l), !=(l, m), ==(m, n)), and(==(i, k), !=(k, l), ==(l, m), ==(m, n)))
+    if @capture cond call(or, ~conds...) 
+        for cond in conds 
+            val = get_lookup_idx(cond)
+            table[val] = factor
+        end
+    # given something like and(==(i, k), ==(k, l), ==(l, m), ==(m, n))
+    else
+        val = get_lookup_idx(cond)
+        @capture cond call(and, ~equalities...)
+        # if this is the case, then we also only have one assignment in the conditional block with our methodology
+        # since all indices are equivalent so we divide the factor by the number of permutable indices
+        # because we will end up repeating the assignment that many times
+        table[val] = factor / (length(equalities) + 1)
+    end
+end
+
+function is_all_eq(conditions)
+    for condition in conditions
+        if !(@capture condition call(==, ~idx_1, ~idx_2))
+            return false
+        end
+    end
+    return true
 end
 
 function insert_lookup(ex, conditions)
@@ -1059,6 +1101,7 @@ function insert_lookup(ex, conditions)
     all_blocks = []
     lookup_tables = []
     for (hsh, assignments) in lookup_block
+        # There are multiple conditional blocks with the same set of assignments (just different factors)
         if length(blocks[hsh]) > 1
             ctx = JuliaContext()
             factor = freshen(ctx, :factor)
@@ -1075,7 +1118,12 @@ function insert_lookup(ex, conditions)
             new_block = define(idx, val, new_block)
             push!(all_blocks, new_block)
             push!(lookup_tables, lookup_table[hsh])
+        # There is a conditional block with only one assignment because all the permutable indices are equivalent
+        elseif (@capture blocks[hsh][1] sieve(call(and, ~conditions...), ~body)) && is_all_eq(conditions)
+            push!(lookup_tables, lookup_table[hsh])
+        # There is a conditional block that has a different set of assignments than the others
         else
+            display(blocks[hsh][1])
             push!(all_blocks, blocks[hsh][1])
         end
     end
@@ -1148,6 +1196,30 @@ function triangularize_binary_op(ex)
     return triangularize(ex, idxs)
 end
 
+function consolidate_updates(ex, permutable_idxs)
+    updates = Set()
+    conditions = []
+    Postwalk(@rule assign(~lhs, ~mode, ~rhs) => begin
+        push!(updates, assign(lhs, mode, rhs))
+    end)(ex)
+    Postwalk(@rule sieve(~cond, ~body) => begin
+        if !is_base(cond)
+            push!(conditions, cond)
+        end
+    end)(ex)
+
+    updates = collect(updates)
+    triangle_condition = get_triangular_condition(ex, permutable_idxs)
+    sieves = []
+    for i in 1:length(conditions)
+        condition = conditions[i]
+        update = updates[i]
+        consolidated_condition = consolidate_comparisons([condition, triangle_condition])
+        push!(sieves, sieve(consolidated_condition, update))
+    end
+    return block(sieves...)
+end
+
 """
     symmetrize(ex, symmetric_tns)
 
@@ -1201,12 +1273,9 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, include_lo
     ex = add_updates(ex, conditions, permutable_idxs, issymmetric)
     ex = group_assignments(ex)
     ex, replicate = exploit_output_replication(ex)
+    ex_before_group = ex
     # TODO: grouping takes a LONG time - constrain when we actually do this?
     grouped, ex = group_sieves(ex, issymmetric, permutable_idxs)
-    # grouped = false
-    # if length(loop_order) > 3
-    #     grouped, ex = group_sieves(ex, issymmetric, permutable_idxs)
-    # end
     ex = triangularize(ex, permutable_idxs, diagonals)
     if !grouped 
         ex_2 = consolidate_conditions(ex)
@@ -1218,11 +1287,22 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, include_lo
     else
         lookup_table = nothing
         ex_base, ex_edge = separate_loop_nests(ex)
+        # we were able to group together the base condition with the edge conditions
+        # try consolidating updates instead as it may result in overall fewer updates
+        if ex_base == nothing
+            ex = consolidate_updates(ex_before_group, permutable_idxs)
+            ex = consolidate_reads(ex)
+            ex = insert_loops(ex, permutable_idxs, loop_order)
+            return ex, nothing, transposed, replicate, nothing
+        end
+
         if include_lookup_table || updates_count(ex_base) > 24
-            lookup_table, ex_edge = insert_lookup(ex_edge, conditions[end])
+            lookup_tables, ex_edge = insert_lookup(ex_edge, conditions[end])
+            lookup_table = reduce(+, lookup_tables)
         end
         ex_base = consolidate_reads(ex_base)
         ex_edge = consolidate_reads(ex_edge)
+        # TODO: fix when this happens
         ex_edge = insert_identity(ex_edge)
         ex_base = insert_loops(ex_base, permutable_idxs, loop_order)
         ex_edge = insert_loops(ex_edge, permutable_idxs, loop_order)
@@ -1351,8 +1431,8 @@ end
 
 function format_lookup_table(lookup_table::Vector{T}, chunk_size::Int=15) where T
     chunks = [lookup_table[i:min(i+chunk_size-1, end)] for i in 1:chunk_size:length(lookup_table)]
-    formatted = join([join(chunk, ", ") for chunk in chunks], "\n")
-    return "lookup = $formatted"
+    formatted = join([join(chunk, ", ") for chunk in chunks], ",\n")
+    return "lookup = [$formatted]"
 end
 
 function execute(ex, func_name, symmetric_tns, loop_order, filename)

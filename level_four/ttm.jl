@@ -320,39 +320,40 @@ n = 100
     end)
     println("done evaluating opt6")
 
-    println("evaluating opt7")
-    eval(@finch_kernel mode=:fast function mode1_product_opt7(C, A, X) 
-        C .= 0
-        for l=_, k=_, j=_, i=_
-            let A_jkl = A[j, k, l], j_leq_k = (j <= k), k_leq_l = (k <= l)
-                if j_leq_k && k_leq_l
-                    C[i, j, l] += X[i, k] * A_jkl
-                end
-                if j < k && k_leq_l
-                    C[i, k, l] += A_jkl * X[i, j]
-                end
-                if j_leq_k && k < l 
-                    C[i, j, k] += X[i, l] * A_jkl
-                end
-            end
-        end
-    end)
-    println("done evaluating opt7")
+    # println("evaluating opt7")
+    # eval(@finch_kernel mode=:fast function mode1_product_opt7(C, A, X) 
+    #     C .= 0
+    #     for l=_, k=_, j=_, i=_
+    #         let A_jkl = A[j, k, l], j_leq_k = (j <= k), k_leq_l = (k <= l)
+    #             if j_leq_k && k_leq_l
+    #                 C[i, j, l] += X[i, k] * A_jkl
+    #             end
+    #             if j < k && k_leq_l
+    #                 C[i, k, l] += A_jkl * X[i, j]
+    #             end
+    #             if j_leq_k && k < l 
+    #                 C[i, j, k] += X[i, l] * A_jkl
+    #             end
+    #         end
+    #     end
+    # end)
+    # println("done evaluating opt7")
 
     println("evaluating opt8")
     eval(@finch_kernel mode=:fast function mode1_product_opt8(C, A, X) 
         C .= 0
         for l=_, k=_, j=_, i=_
-            let A_jkl = A[j, k, l]
-                if k <= l
-                    if j <= k
-                        C[i, j, l] += X[i, k] * A_jkl
-                        if k < l
-                            C[i, j, k] += X[i, l] * A_jkl
+            if and(<=(identity(j), identity(k)), <=(identity(k), identity(l)))
+                let jk_eq = (j == k), kl_eq = (k == l)
+                    let A_jkl = A[j, k, l]
+                        if or(and(!=(j, k), !=(k, l)), and(==(j, k), !=(k, l)), and(!=(j, k), ==(k, l)))
+                            C[i, k, l] += *(A_jkl, X[i, j])
+                            C[i, j, l] += *(A_jkl, X[i, k])
+                            C[i, j, k] += *(A_jkl, X[i, l])
                         end
-                    end
-                    if j < k
-                        C[i, k, l] += A_jkl * X[i, j]
+                        if and(==(j, k), ==(k, l))
+                            C[i, j, l] += *(A_jkl, X[i, k])
+                        end
                     end
                 end
             end
@@ -448,8 +449,24 @@ function main()
     # @info "check" check[]
 
     @btime mode1_product_opt6($C, $A, $X)
-    @btime mode1_product_opt7($C, $A, $X)
+    check = Scalar(true)
+    @finch for l=_, j=_, i=_
+        if j <= l
+            check[] &= C[i, j, l] == ref[i, j, l]
+        end
+    end
+    @info "check" check[]
+
+    # @btime mode1_product_opt7($C, $A, $X)
+
     @btime mode1_product_opt8($C, $A, $X)
+    check = Scalar(true)
+    @finch for l=_, j=_, i=_
+        if j <= l
+            check[] &= C[i, j, l] == ref[i, j, l]
+        end
+    end
+    @info "check" check[]
 end
 
 main()

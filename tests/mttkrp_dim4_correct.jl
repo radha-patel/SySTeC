@@ -4,9 +4,9 @@ eval(@finch_kernel mode=:fast function mttkrp_dim4_finch_opt_helper_base(A, B_T,
         if and((i < k), (k < l), (l < m))
             let B_T_ji = B_T[j, i], B_T_jk = B_T[j, k], A_iklm = A[i, k, l, m], B_T_jm = B_T[j, m], B_T_jl = B_T[j, l]
                 C_T[j, m] += *(6, *(B_T_jk, A_iklm, B_T_jl, B_T_ji))
-                C_T[j, l] += *(6, *(B_T_jk, A_iklm, B_T_ji, B_T_jm))
-                C_T[j, i] += *(6, *(B_T_jk, A_iklm, B_T_jl, B_T_jm))
                 C_T[j, k] += *(6, *(A_iklm, B_T_jl, B_T_ji, B_T_jm))
+                C_T[j, i] += *(6, *(B_T_jk, A_iklm, B_T_jl, B_T_jm))
+                C_T[j, l] += *(6, *(B_T_jk, A_iklm, B_T_ji, B_T_jm))
             end
         end
     end
