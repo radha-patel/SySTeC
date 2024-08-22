@@ -866,7 +866,6 @@ Returns whether `op` is a an == operator.
 """
 is_eq_op(op) = op == literal(==)
 
-
 """
     insert_identity(ex)
 
@@ -875,12 +874,18 @@ for a diagonal-related update.
 """
 function insert_identity(ex)
     if @capture ex sieve(~triangular_condition, ~ex_2)
-        # ex_2 = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
-        #     call(op, call(identity, idx_1), call(identity, idx_2))
-        # end))(ex_2)
-        triangular_condition = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
-            call(op, call(identity, idx_1), call(identity, idx_2))
-        end))(triangular_condition)
+        idxs = order_canonically(collect(get_idxs(triangular_condition)))
+        if length(idxs) >= 5
+            ex_2 = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
+                if idx_1 != idxs[1] && idx_1 != idxs[2]
+                    return call(op, call(identity, idx_1), call(identity, idx_2))
+                end
+            end))(ex_2)
+        else
+            triangular_condition = Rewrite(Postwalk(@rule call(~op::is_comparison, ~idx_1, ~idx_2) => begin
+                call(op, call(identity, idx_1), call(identity, idx_2))
+            end))(triangular_condition)
+        end
         ex = sieve(triangular_condition, ex_2)
     end
     ex 
@@ -1220,6 +1225,19 @@ function consolidate_updates(ex, permutable_idxs)
     return block(sieves...)
 end
 
+
+function form_tensor(tn, label)
+    ctx = JuliaContext()
+    var_name = Symbol(tn, "_", label)
+    var = freshen(ctx, var_name)
+    return var
+end
+
+function rename_tensor(ex, original, renamed) 
+    is_same_tn(ex::FinchNode) = ex.kind === literal && ex.val == original
+    return Rewrite(Postwalk(@rule ~idx::is_same_tn => renamed))(ex)
+end
+
 """
     symmetrize(ex, symmetric_tns)
 
@@ -1302,6 +1320,10 @@ function symmetrize(ex, symmetric_tns, loop_order=[], diagonals=true, include_lo
         end
         ex_base = consolidate_reads(ex_base)
         ex_edge = consolidate_reads(ex_edge)
+        for tn in symmetric_tns
+            ex_base = rename_tensor(ex_base, tn, form_tensor(tn, "nondiag"))
+            ex_edge = rename_tensor(ex_edge, tn, form_tensor(tn, "diag"))
+        end
         # TODO: fix when this happens
         ex_edge = insert_identity(ex_edge)
         ex_base = insert_loops(ex_base, permutable_idxs, loop_order)
