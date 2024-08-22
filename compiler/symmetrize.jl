@@ -710,7 +710,7 @@ function consolidate_operators(ops)
     if all(op -> in(op, ops), [literal(<=), literal(!=)]) && length(ops) == 2
         return literal(<)
     elseif all(op -> in(op, ops), [literal(<=), literal(==)]) && length(ops) == 2
-        return literal(==)
+        return literal(<=)
     elseif all(op -> in(op, ops), [literal(<=), literal(==), literal(!=)]) && length(ops) == 3
         return literal(<=)
     else
@@ -1128,7 +1128,6 @@ function insert_lookup(ex, conditions)
             push!(lookup_tables, lookup_table[hsh])
         # There is a conditional block that has a different set of assignments than the others
         else
-            display(blocks[hsh][1])
             push!(all_blocks, blocks[hsh][1])
         end
     end
